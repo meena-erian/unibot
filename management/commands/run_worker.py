@@ -5,6 +5,8 @@ from unibot.models import Bot
 import importlib.util
 import os
 import time
+from django.conf import settings
+from openai import OpenAI
 
 class Command(BaseCommand):
     help = 'Run the bot worker to process requests.'
@@ -49,6 +51,9 @@ class Command(BaseCommand):
                         import types
                         bot_code = bot.code or Bot.get_default_code()
                         module = types.ModuleType('bot_code')
+                        # Inject OpenAI client as a global
+                        openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+                        module.__dict__["openai_client"] = openai_client
                         exec(bot_code, module.__dict__)
                         handler = getattr(module, 'handle_incoming_message', None)
                         if not handler:
