@@ -7,6 +7,7 @@ import os
 import time
 from django.conf import settings
 from openai import OpenAI
+import traceback
 
 class Command(BaseCommand):
     help = 'Run the bot worker to process requests.'
@@ -72,7 +73,7 @@ class Command(BaseCommand):
                             self.stdout.write(self.style.SUCCESS(f'Processed request {req.id}'))
                         except Exception as e:
                             req.status = 'FAILED'
-                            req.error = str(e)
+                            req.error = traceback.format_exc()
                             req.save(update_fields=['status', 'error'])
                             self.stderr.write(self.style.ERROR(f'Failed to process request {req.id}: {e}'))
                 if processed == 0:
