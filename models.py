@@ -2,6 +2,9 @@ from django.db import models
 import os
 from django.conf import settings
 from unicom.models.request_category import RequestCategory
+import types
+import traceback
+from openai import OpenAI
 
 # Create your models here.
 
@@ -37,3 +40,34 @@ class Bot(models.Model):
         super().delete(*args, **kwargs)
         if rc:
             rc.delete()
+
+    def process_request(self, req):
+        """
+        Process a single Request object using this bot's code, updating status and error fields as needed.
+        """
+        bot_code = self.code or Bot.get_default_code()
+        module = types.ModuleType('bot_code')
+        openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        module.__dict__["openai_client"] = openai_client
+        exec(bot_code, module.__dict__)
+        handler = getattr(module, 'handle_incoming_message', None)
+        if not handler:
+            # Use default handler from default_bot.py
+            default_code = Bot.get_default_code()
+            exec(default_code, module.__dict__)
+            handler = getattr(module, 'handle_incoming_message', None)
+        if not handler:
+            req.status = 'FAILED'
+            req.error = f'No handle_incoming_message function defined for bot {self.id}'
+            req.save(update_fields=['status', 'error'])
+            return False
+        try:
+            handler(req.message, self)
+            req.status = 'COMPLETED'
+            req.save(update_fields=['status'])
+            return True
+        except Exception as e:
+            req.status = 'FAILED'
+            req.error = traceback.format_exc()
+            req.save(update_fields=['status', 'error'])
+            return False

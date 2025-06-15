@@ -48,34 +48,12 @@ class Command(BaseCommand):
                         if not bot:
                             self.stderr.write(self.style.ERROR(f'No bot found for category {req.category_id}'))
                             continue
-                        # Load bot code
-                        import types
-                        bot_code = bot.code or Bot.get_default_code()
-                        module = types.ModuleType('bot_code')
-                        # Inject OpenAI client as a global
-                        openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
-                        module.__dict__["openai_client"] = openai_client
-                        exec(bot_code, module.__dict__)
-                        handler = getattr(module, 'handle_incoming_message', None)
-                        if not handler:
-                            # Use default handler from default_bot.py
-                            default_code = Bot.get_default_code()
-                            exec(default_code, module.__dict__)
-                            handler = getattr(module, 'handle_incoming_message', None)
-                        if not handler:
-                            self.stderr.write(self.style.ERROR(f'No handle_incoming_message function defined for bot {bot.id}'))
-                            continue
-                        try:
-                            handler(req.message, bot)
-                            req.status = 'COMPLETED'
-                            req.save(update_fields=['status'])
+                        result = bot.process_request(req)
+                        if result:
                             processed += 1
                             self.stdout.write(self.style.SUCCESS(f'Processed request {req.id}'))
-                        except Exception as e:
-                            req.status = 'FAILED'
-                            req.error = traceback.format_exc()
-                            req.save(update_fields=['status', 'error'])
-                            self.stderr.write(self.style.ERROR(f'Failed to process request {req.id}: {e}'))
+                        else:
+                            self.stderr.write(self.style.ERROR(f'Failed to process request {req.id}: {getattr(req, "error", "Unknown error")}'))
                 if processed == 0:
                     time.sleep(sleep_time)
         except KeyboardInterrupt:
