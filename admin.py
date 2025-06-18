@@ -1,5 +1,5 @@
 from django.contrib import admin
-from .models import Bot
+from .models import Bot, Tool
 from django import forms
 from django_ace import AceWidget
 
@@ -19,4 +19,19 @@ class BotAdmin(admin.ModelAdmin):
     def get_changeform_initial_data(self, request):
         return {'code': Bot.get_default_code()}
 
+class ToolAdminForm(forms.ModelForm):
+    class Meta:
+        model = Tool
+        fields = '__all__'
+        widgets = {
+            'code': AceWidget(mode='python', theme='twilight', width='600px', height='300px'),
+        }
+
+class ToolAdmin(admin.ModelAdmin):
+    form = ToolAdminForm
+
+    def get_changeform_initial_data(self, request):
+        return {'code': Tool.get_default_code()}
+
 admin.site.register(Bot, BotAdmin)
+admin.site.register(Tool, ToolAdmin)

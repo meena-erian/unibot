@@ -29,6 +29,12 @@ class Tool(models.Model):
         exec(self.code, module.__dict__)
         return getattr(module, 'tool_definition', None)
 
+    @staticmethod
+    def get_default_code():
+        template_path = os.path.join(settings.BASE_DIR, 'unibot', 'templates', 'unibot', 'default_tool.py')
+        with open(template_path, 'r') as f:
+            return f.read()
+
 class Bot(models.Model):
     id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=255)
