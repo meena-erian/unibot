@@ -29,8 +29,15 @@ tool_definition = {
     "name": "summarize_webpage",
     "description": "Fetches a web page and returns a summary of its content.",
     "parameters": {
-        "url": {"type": "str", "description": "The URL of the web page to summarize."},
-        "max_sentences": {"type": "int", "description": "Maximum number of sentences in the summary.", "default": 3}
+        "url": {
+            "type": "string", 
+            "description": "The URL of the web page to summarize."
+        },
+        "max_sentences": {
+            "type": "integer", 
+            "description": "Maximum number of sentences in the summary.", 
+            "default": 3
+        }
     },
     "run": summarize_webpage
 } 

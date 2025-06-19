@@ -79,23 +79,20 @@ class Bot(models.Model):
         module = types.ModuleType('bot_code')
         openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
         module.__dict__["openai_client"] = openai_client
-        exec(bot_code, module.__dict__)
-        handler = getattr(module, 'handle_incoming_message', None)
-        if not handler:
-            # Use default handler from default_bot.py
-            default_code = Bot.get_default_code()
-            exec(default_code, module.__dict__)
-            handler = getattr(module, 'handle_incoming_message', None)
-        if not handler:
-            req.status = 'FAILED'
-            req.error = f'No handle_incoming_message function defined for bot {self.id}'
-            req.save(update_fields=['status', 'error'])
-            return False
-
-        # Gather tools assigned to this bot
         tools_list = list(self.tools.all())
-
         try:
+            exec(bot_code, module.__dict__)
+            handler = getattr(module, 'handle_incoming_message', None)
+            if not handler:
+                # Use default handler from default_bot.py
+                default_code = Bot.get_default_code()
+                exec(default_code, module.__dict__)
+                handler = getattr(module, 'handle_incoming_message', None)
+            if not handler:
+                req.status = 'FAILED'
+                req.error = f'No handle_incoming_message function defined for bot {self.id}'
+                req.save(update_fields=['status', 'error'])
+                return False
             # Pass message, bot instance, and tools list
             handler(req.message, self, tools_list)
             req.status = 'COMPLETED'
