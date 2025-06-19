@@ -1,7 +1,9 @@
 from django.db import models
 import os
 from django.conf import settings
-from unicom.models.request_category import RequestCategory
+from unicom.models import RequestCategory, Message
+from unibot.services.llm_handler import run_llm_handler
+from typing import Callable, Dict, List, Optional, Type
 import types
 import traceback
 from openai import OpenAI
@@ -69,6 +71,35 @@ class Bot(models.Model):
         super().delete(*args, **kwargs)
         if rc:
             rc.delete()
+
+    def reply_using_llm(
+        self,
+        message: Message,
+        tools_list: List[Tool],
+        model_audio: str = "gpt-4o-audio-preview",
+        model_default: str = "o4-mini-2025-04-16",
+        system_instruction: Optional[str] = None,
+        depth: int = 10,
+        mode: str = "thread",
+        max_function_calls: int = 3,
+        openai_client: OpenAI = None,
+    ):
+        if openai_client is None:
+            openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        return run_llm_handler(
+            self,
+            message,
+            tools_list,
+            model_audio=model_audio,
+            model_default=model_default,
+            system_instruction=system_instruction,
+            max_function_calls=max_function_calls,
+            as_llm_chat_params={
+                "depth": depth,
+                "mode": mode,
+            },
+            openai_client=openai_client,
+        )
 
     def process_request(self, req):
         """
