@@ -7,9 +7,11 @@ from typing import Callable, Dict, List, Optional, Type
 import types
 import traceback
 from openai import OpenAI
+import reversion
 
 # Create your models here.
 
+@reversion.register()
 class Tool(models.Model):
     id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=255)
@@ -37,6 +39,7 @@ class Tool(models.Model):
         with open(template_path, 'r') as f:
             return f.read()
 
+@reversion.register()
 class Bot(models.Model):
     id = models.BigAutoField(primary_key=True)
     name = models.CharField(max_length=255)
