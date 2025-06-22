@@ -6,9 +6,12 @@ import base64
 import uuid
 import re
 import json
-from typing import Callable, Dict, List, Optional, Type
+import os
+from pathlib import Path
+from typing import Callable, Dict, List, Optional, Type, Union
 from openai import OpenAI
 from unicom.models.message import Message
+from .tool_result_handler import handle_tool_result, prepare_file_response
 
 
 def build_openai_tools(tools_list: Optional[List[object]]) -> (List[dict], Dict[str, Callable]):
@@ -149,6 +152,7 @@ def run_llm_handler(
 
     calls_made = 0
     last_msg = None
+    file_paths = []  # Accumulate file paths from tool calls
     while calls_made < max_function_calls:
         kwargs = {}
         if multimodal:
@@ -179,6 +183,14 @@ def run_llm_handler(
                     print(f"[DEBUG] Executing {fname} with args {fargs}")
                 try:
                     result = tool_map[fname](**fargs)
+                    # Check if the result is a file path
+                    file_path = handle_tool_result(result)
+                    if file_path:
+                        if debug:
+                            print(f"[DEBUG] Tool returned a file: {file_path}")
+                        file_paths.append(file_path)
+                        # Convert result to string for tool response
+                        result = f"File processed: {file_path}"
                     content = json.dumps(result) if not isinstance(result, str) else result
                     tool_responses.append({
                         'role': 'tool',
@@ -201,11 +213,17 @@ def run_llm_handler(
         reply = process_llm_content(msg)
         if debug:
             print("[DEBUG] Sending final reply:", reply)
+        # Add any accumulated file paths to the reply
+        if file_paths:
+            reply.update(prepare_file_response(file_paths, message.platform))
         message.reply_with(reply)
         return
     # Fallback
     content = getattr(last_msg, 'content', '') if last_msg else ''
     fallback = { 'type': 'text', 'text': content or f"Handled by {bot.name}." }
+    # Add any accumulated file paths to the fallback reply
+    if file_paths:
+        fallback.update(prepare_file_response(file_paths, message.platform))
     if debug:
         print("[DEBUG] Fallback reply:", fallback)
     message.reply_with(fallback) 
