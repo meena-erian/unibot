@@ -82,6 +82,28 @@ def process_llm_content(msg: object) -> dict:
     Convert an OpenAI message object to a reply dict for the message.reply_with method.
     Handles audio, image, and text blocks.
     """
+    # First, handle new-style audio responses returned in msg.audio (OpenAI SDK 1.14+)
+    if hasattr(msg, 'audio') and msg.audio and hasattr(msg.audio, 'data'):
+        audio_data = msg.audio.data
+        transcript = getattr(msg.audio, 'transcript', '')
+        audio_id = getattr(msg.audio, 'id', None)
+        # Default to opus/ogg if format not provided
+        # OpenAI SDK may expose 'format' in msg.audio, but fallback to opus
+        audio_format = getattr(msg.audio, 'format', 'opus') or 'opus'
+        ext = 'ogg' if audio_format in {'opus', 'ogg'} else audio_format
+        audio_file_name = f"media/{uuid.uuid4()}.{ext}"
+        with open(audio_file_name, "wb") as f:
+            f.write(base64.b64decode(audio_data))
+        reply_dict = {
+            'type': 'audio',
+            'file_path': audio_file_name,
+        }
+        if audio_id:
+            reply_dict['audio_id'] = audio_id
+        if transcript:
+            reply_dict['text'] = transcript
+        return reply_dict
+
     content = getattr(msg, 'content', None)
     if isinstance(content, list):
         out = None
@@ -104,7 +126,11 @@ def process_llm_content(msg: object) -> dict:
                     out = { 'type': 'image', 'file_path': path, 'text': '' }
             elif t == 'text' and out is None:
                 out = { 'type': 'text', 'text': block['text'] }
-        return out or { 'type': 'text', 'text': '' }
+        # Ensure text messages are never empty to avoid Telegram API 400 error
+        result = out or { 'type': 'text', 'text': '' }
+        if result['type'] == 'text' and not result['text']:
+            result['text'] = ' '
+        return result
     return { 'type': 'text', 'text': content or '' }
 
 
@@ -211,11 +237,32 @@ def run_llm_handler(
             continue
         # No tool calls: finalize
         reply = process_llm_content(msg)
-        if debug:
-            print("[DEBUG] Sending final reply:", reply)
-        # Add any accumulated file paths to the reply
+        # Add any accumulated file paths to the reply before final processing
         if file_paths:
             reply.update(prepare_file_response(file_paths, message.platform))
+
+        # If reply is text but the text is empty/whitespace, remove text key and
+        # attempt to infer a better type from any attached file_path.
+        if reply.get('type') == 'text' and (not reply.get('text') or not str(reply['text']).strip()):
+            reply.pop('text', None)
+            fpath = reply.get('file_path')
+            if fpath:
+                # If multiple paths, take first for type inference
+                if isinstance(fpath, list):
+                    fpath = fpath[0]
+                ext = Path(fpath).suffix.lower()
+                if ext in {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}:
+                    reply['type'] = 'image'
+                elif ext in {'.mp3', '.wav', '.opus', '.ogg', '.m4a'}:
+                    reply['type'] = 'audio'
+                else:
+                    reply['type'] = 'file'
+            else:
+                # Nothing to send; fallback to a minimal placeholder to avoid empty text error
+                reply['text'] = '...'  # will be treated as short text
+
+        if debug:
+            print("[DEBUG] Sending final reply:", reply)
         message.reply_with(reply)
         return
     # Fallback
