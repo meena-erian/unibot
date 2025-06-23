@@ -8,6 +8,8 @@ import types
 import traceback
 from openai import OpenAI
 import reversion
+from django.utils import timezone
+from datetime import timedelta
 
 # Create your models here.
 
@@ -25,6 +27,15 @@ class Tool(models.Model):
     def __str__(self):
         return self.name
 
+    @property
+    def info(self) -> str:
+        """Returns structured information about the tool"""
+        return (
+            f"Tool ID: {self.id}\n"
+            f"Name: {self.name}\n"
+            f"Code: \n{self.code}\n"
+        )
+
     def get_definition(self):
         """
         Execute the tool's code in isolation and return its `tool_definition` dict.
@@ -39,6 +50,16 @@ class Tool(models.Model):
         with open(template_path, 'r') as f:
             return f.read()
 
+    @classmethod
+    def get_template_readme(cls) -> str:
+        """Returns the contents of TOOL_TEMPLATES_README.md"""
+        readme_path = os.path.join(settings.BASE_DIR, 'unibot', 'templates', 'unibot', 'TOOL_TEMPLATES_README.md')
+        try:
+            with open(readme_path, 'r') as f:
+                return f.read()
+        except FileNotFoundError:
+            return "Tool template documentation not found."
+
 @reversion.register()
 class Bot(models.Model):
     id = models.BigAutoField(primary_key=True)
@@ -51,6 +72,44 @@ class Bot(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def info(self) -> str:
+        """Returns structured information about the bot"""
+        # Get tools info
+        tools_info = ", ".join([f"{tool.name} (ID: {tool.id})" for tool in self.tools.all()])
+        
+        # Get recent error if any
+        recent_error = ""
+        if self.request_category:
+            # Assuming Request model has status, created_at, and error fields
+            twelve_hours_ago = timezone.now() - timedelta(hours=24)
+            recent_failed_request = (
+                self.request_category.request_set
+                .filter(status='FAILED', created_at__gte=twelve_hours_ago)
+                .order_by('-created_at')
+                .first()
+            )
+            if recent_failed_request:
+                recent_error = f"\nLast Recent Error: {recent_failed_request.error}"
+
+        return (
+            f"Bot ID: {self.id}\n"
+            f"Name: {self.name}\n"
+            + (f"Tools: {tools_info}\n" if tools_info else "")
+            + f"Code: \n{self.code}\n"
+            + (f"Recent Error: {recent_error}\n" if recent_error else "")
+        )
+
+    @classmethod
+    def get_template_readme(cls) -> str:
+        """Returns the contents of BOT_TEMPLATES_README.md"""
+        readme_path = os.path.join(settings.BASE_DIR, 'unibot', 'templates', 'unibot', 'BOT_TEMPLATES_README.md')
+        try:
+            with open(readme_path, 'r') as f:
+                return f.read()
+        except FileNotFoundError:
+            return "Bot template documentation not found."
 
     @staticmethod
     def get_default_code():
