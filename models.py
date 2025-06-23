@@ -23,7 +23,6 @@ import logging
 def get_encryption_key():
     """Get or create the encryption key from Django settings"""
     key = getattr(settings, 'CREDENTIAL_ENCRYPTION_KEY', None)
-    logging.warning(f"[DEBUG] Raw CREDENTIAL_ENCRYPTION_KEY: {repr(key)} (length: {len(key) if key else 'None'})")
     if key is None:
         # Generate a new key if none exists
         key = Fernet.generate_key().decode()
@@ -232,11 +231,12 @@ class EncryptedCredential(models.Model):
         if not self.value:
             return None
         f = Fernet(get_encryption_key())
-        try:
+        if isinstance(self.value, memoryview):
+            decrypted = f.decrypt(self.value.tobytes())
+        else:
             decrypted = f.decrypt(self.value)
-            return decrypted.decode()
-        except Exception:
-            return None
+        return decrypted.decode()
+
 
     def save(self, *args, **kwargs):
         if hasattr(self, '_value'):
