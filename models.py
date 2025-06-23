@@ -1,7 +1,7 @@
 from django.db import models
 import os
 from django.conf import settings
-from unicom.models import RequestCategory, Message
+from unicom.models import RequestCategory, Message, Account
 from unibot.services.llm_handler import run_llm_handler
 from typing import Callable, Dict, List, Optional, Type
 import types
@@ -10,8 +10,241 @@ from openai import OpenAI
 import reversion
 from django.utils import timezone
 from datetime import timedelta
+from cryptography.fernet import Fernet
+import base64
+import uuid
+import json
+from django.core.validators import RegexValidator, EmailValidator
+from django.core.exceptions import ValidationError
+import logging
 
 # Create your models here.
+
+def get_encryption_key():
+    """Get or create the encryption key from Django settings"""
+    key = getattr(settings, 'CREDENTIAL_ENCRYPTION_KEY', None)
+    logging.warning(f"[DEBUG] Raw CREDENTIAL_ENCRYPTION_KEY: {repr(key)} (length: {len(key) if key else 'None'})")
+    if key is None:
+        # Generate a new key if none exists
+        key = Fernet.generate_key().decode()
+        logging.warning(f"[DEBUG] Generated fallback key: {repr(key)} (length: {len(key)})")
+    # Do NOT decode here! Fernet expects the base64 string.
+    return key
+
+class CredentialFieldType(models.TextChoices):
+    TEXT = 'text', 'Text'
+    EMAIL = 'email', 'Email'
+    NUMBER = 'number', 'Number'
+    PHONE = 'phone', 'Phone Number'
+    PASSWORD = 'password', 'Password'
+    PIN = 'pin', 'PIN'
+
+@reversion.register()
+class CredentialFieldDefinition(models.Model):
+    """Defines the structure and validation rules for a credential field"""
+    key = models.CharField(
+        max_length=255,
+        unique=True,
+        help_text="Globally unique identifier for this credential (e.g., 'GOOGLE_PLACES_API_KEY', 'STRIPE_SECRET_KEY_LIVE')"
+    )
+    field_type = models.CharField(
+        max_length=20,
+        choices=CredentialFieldType.choices,
+        default=CredentialFieldType.TEXT
+    )
+    label = models.CharField(max_length=255)
+    help_text = models.TextField(blank=True)
+    placeholder = models.CharField(max_length=255, blank=True)
+    regex_pattern = models.CharField(
+        max_length=255, 
+        blank=True,
+        help_text="Optional regex pattern for validation"
+    )
+    min_length = models.IntegerField(null=True, blank=True)
+    max_length = models.IntegerField(null=True, blank=True)
+    required = models.BooleanField(default=True)
+    order = models.IntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.label} ({self.key})"
+
+    @classmethod
+    def get_available_fields_info(cls) -> str:
+        """Returns a human-readable list of available credential fields"""
+        fields = cls.objects.all().order_by('order', 'key')
+        if not fields:
+            return "No credential fields defined yet."
+        
+        field_descriptions = []
+        for field in fields:
+            constraints = []
+            if field.min_length:
+                constraints.append(f"min={field.min_length}")
+            if field.max_length:
+                constraints.append(f"max={field.max_length}")
+            if field.regex_pattern:
+                constraints.append("has pattern")
+            
+            constraints_str = f" ({', '.join(constraints)})" if constraints else ""
+            field_descriptions.append(
+                f"- {field.key}: {field.field_type}{constraints_str}"
+            )
+        
+        return "Available credential fields:\n" + "\n".join(field_descriptions)
+
+    def clean(self):
+        super().clean()
+        # Validate regex pattern if provided
+        if self.regex_pattern:
+            try:
+                import re
+                re.compile(self.regex_pattern)
+            except re.error:
+                raise ValidationError({'regex_pattern': 'Invalid regular expression pattern'})
+        
+        # Enforce key naming convention
+        if not self.key.isupper() or '_' not in self.key or len(self.key) < 12:
+            raise ValidationError({
+                'key': 'Key must be uppercase, contain underscores, and be at least 12 characters long (e.g., GOOGLE_PLACES_API_KEY)'
+            })
+
+    def validate_value(self, value: str) -> tuple[bool, Optional[str]]:
+        """Validate a value against this field's rules"""
+        if not value and self.required:
+            return False, "This field is required"
+
+        if value:
+            if self.min_length and len(value) < self.min_length:
+                return False, f"Minimum length is {self.min_length} characters"
+            
+            if self.max_length and len(value) > self.max_length:
+                return False, f"Maximum length is {self.max_length} characters"
+
+            if self.regex_pattern:
+                import re
+                if not re.match(self.regex_pattern, value):
+                    return False, "Value does not match the required pattern"
+
+            if self.field_type == CredentialFieldType.EMAIL:
+                try:
+                    EmailValidator()(value)
+                except ValidationError:
+                    return False, "Enter a valid email address"
+
+            elif self.field_type == CredentialFieldType.NUMBER:
+                try:
+                    float(value)
+                except ValueError:
+                    return False, "Enter a valid number"
+
+            elif self.field_type == CredentialFieldType.PHONE:
+                # Basic phone validation - can be enhanced based on requirements
+                if not re.match(r'^\+?[\d\s-]+$', value):
+                    return False, "Enter a valid phone number"
+
+            elif self.field_type == CredentialFieldType.PIN:
+                if not value.isdigit():
+                    return False, "PIN must contain only digits"
+
+        return True, None
+
+    class Meta:
+        ordering = ['order', 'key']
+
+@reversion.register()
+class CredentialSetupSession(models.Model):
+    """Manages a time-limited session for setting multiple credentials"""
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    account = models.ForeignKey(Account, on_delete=models.CASCADE)
+    field_definitions = models.ManyToManyField(CredentialFieldDefinition)
+    expires_at = models.DateTimeField()
+    created_at = models.DateTimeField(auto_now_add=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    max_attempts = models.IntegerField(default=3)
+    attempts = models.IntegerField(default=0)
+    metadata = models.JSONField(default=dict, blank=True)
+
+    @property
+    def is_expired(self) -> bool:
+        if self.expires_at is None:
+            return False
+        return timezone.now() > self.expires_at
+
+    @property
+    def is_completed(self) -> bool:
+        return self.completed_at is not None
+
+    @property
+    def can_attempt(self) -> bool:
+        return not self.is_expired and not self.is_completed and self.attempts < self.max_attempts
+
+    def mark_completed(self):
+        self.completed_at = timezone.now()
+        self.save(update_fields=['completed_at'])
+
+    def increment_attempts(self):
+        self.attempts += 1
+        self.save(update_fields=['attempts'])
+
+    @classmethod
+    def create_session(
+        cls,
+        account: Account,
+        field_definitions: List[CredentialFieldDefinition],
+        expires_in_minutes: int = 30,
+        max_attempts: int = 3,
+        metadata: Optional[Dict] = None
+    ) -> 'CredentialSetupSession':
+        """Create a new credential setup session"""
+        session = cls.objects.create(
+            account=account,
+            expires_at=timezone.now() + timedelta(minutes=expires_in_minutes),
+            max_attempts=max_attempts,
+            metadata=metadata or {}
+        )
+        session.field_definitions.set(field_definitions)
+        return session
+
+    def __str__(self):
+        return f"Credential Setup for {self.account} ({self.id})"
+
+@reversion.register()
+class EncryptedCredential(models.Model):
+    """Model for storing encrypted key-value pairs"""
+    account = models.ForeignKey(Account, on_delete=models.CASCADE, related_name='credentials')
+    key = models.CharField(max_length=255)
+    value = models.BinaryField(editable=False)  # Stores the encrypted value
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = ['account', 'key']
+        indexes = [
+            models.Index(fields=['account', 'key']),
+        ]
+
+    def __str__(self):
+        return f"{self.account} - {self.key}"
+
+    @property
+    def decrypted_value(self) -> Optional[str]:
+        """Get the decrypted value"""
+        if not self.value:
+            return None
+        f = Fernet(get_encryption_key())
+        try:
+            decrypted = f.decrypt(self.value)
+            return decrypted.decode()
+        except Exception:
+            return None
+
+    def save(self, *args, **kwargs):
+        if hasattr(self, '_value'):
+            # Encrypt the value before saving
+            f = Fernet(get_encryption_key())
+            self.value = f.encrypt(self._value.encode())
+            del self._value
+        super().save(*args, **kwargs)
 
 @reversion.register()
 class Tool(models.Model):
@@ -36,11 +269,22 @@ class Tool(models.Model):
             f"Code: \n{self.code}\n"
         )
 
-    def get_definition(self):
+    def get_definition(self, bot=None, message=None, openai_client=None):
         """
         Execute the tool's code in isolation and return its `tool_definition` dict.
+        Injects bot, message, and openai_client into the tool's global context if provided.
         """
+        account = message.sender
         module = types.ModuleType('tool_module')
+        # Inject globals if provided
+        if bot is not None:
+            module.__dict__["bot"] = bot
+        if message is not None:
+            module.__dict__["message"] = message
+        if account is not None:
+            module.__dict__["account"] = account
+        if openai_client is not None:
+            module.__dict__["openai_client"] = openai_client
         exec(self.code, module.__dict__)
         return getattr(module, 'tool_definition', None)
 
@@ -160,6 +404,7 @@ class Bot(models.Model):
                 "depth": depth,
                 "mode": mode,
             },
+            debug=True,
             openai_client=openai_client,
         )
 
@@ -171,7 +416,12 @@ class Bot(models.Model):
         bot_code = self.code or Bot.get_default_code()
         module = types.ModuleType('bot_code')
         openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
-        module.__dict__["openai_client"] = openai_client
+        module.__dict__.update({
+            "openai_client": openai_client,
+            "bot": self,
+            "message": req.message,
+            "account": req.message.sender
+        })
         tools_list = list(self.tools.all())
         try:
             exec(bot_code, module.__dict__)
