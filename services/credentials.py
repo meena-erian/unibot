@@ -127,8 +127,8 @@ def request_credentials(account: Account, bot: Bot, message: Message, credential
     message.reply_with({"text": msg})
 
     # Poll for session completion or expiration
-    timeout = 180  # seconds
-    poll_interval = 3  # seconds
+    timeout = 0 # 180  # seconds
+    poll_interval = 0 # 3  # seconds
     waited = 0
     while waited < timeout:
         session.refresh_from_db()
