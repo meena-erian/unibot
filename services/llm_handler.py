@@ -14,7 +14,7 @@ from unicom.models.message import Message
 from .tool_result_handler import handle_tool_result, prepare_file_response
 
 
-def build_openai_tools(tools_list: Optional[List[object]]) -> (List[dict], Dict[str, Callable]):
+def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=None, openai_client=None) -> (List[dict], Dict[str, Callable]):
     """
     Build OpenAI tool schema and a map of tool name to run function from a list of tool objects.
     Args:
@@ -26,54 +26,59 @@ def build_openai_tools(tools_list: Optional[List[object]]) -> (List[dict], Dict[
     openai_tools = []
     tool_map = {}
     for tool in (tools_list or []):
-        try:
-            defn = tool.get_definition()
-            if not defn:
-                continue
-            run_fn = defn.pop('run', None)
-            name = defn.get('name')
-            if run_fn:
-                tool_map[name] = run_fn
-            # Build JSON Schema for parameters
-            raw_params = defn.get('parameters', {})
-            props = {}
-            required = []
-            for pname, pinfo in raw_params.items():
-                ptype = pinfo.get('type', 'string')
-                if ptype in ('str', 'string'):
-                    otype = 'string'
-                elif ptype in ('int', 'integer'):
-                    otype = 'integer'
-                elif ptype in ('float', 'number'):
-                    otype = 'number'
-                elif ptype in ('bool', 'boolean'):
-                    otype = 'boolean'
-                else:
-                    otype = 'string'
-                prop = {'type': otype}
-                if 'description' in pinfo:
-                    prop['description'] = pinfo['description']
-                if 'default' in pinfo:
-                    prop['default'] = pinfo['default']
-                else:
-                    required.append(pname)
-                props[pname] = prop
-            param_schema = { 'type': 'object',
-                             'properties': props,
-                             'additionalProperties': False }
-            if required:
-                param_schema['required'] = required
-            openai_tools.append({
-                'type': 'function',
-                'function': {
-                    'name': name,
-                    'description': defn.get('description', ''),
-                    'parameters': param_schema
-                },
-                'strict': True
-            })
-        except Exception as e:
-            print(f"[ERROR] Tool registration failed for {tool}: {e}")
+        defn = tool.get_definition(bot=bot, message=message, openai_client=openai_client)
+        if not defn:
+            print(f"[DEBUG] Tool {tool} skipped: get_definition() returned None or empty.")
+            continue
+        run_fn = defn.pop('run', None)
+        name = defn.get('name')
+        if not name:
+            print(f"[DEBUG] Tool {tool} skipped: definition missing 'name'. Definition: {defn}")
+            continue
+        if run_fn:
+            tool_map[name] = run_fn
+        else:
+            print(f"[DEBUG] Tool {tool} ('{name}') skipped: definition missing 'run' function. Definition: {defn}")
+            continue
+        # Build JSON Schema for parameters
+        raw_params = defn.get('parameters', {})
+        props = {}
+        required = []
+        for pname, pinfo in raw_params.items():
+            ptype = pinfo.get('type', 'string')
+            if ptype in ('str', 'string'):
+                otype = 'string'
+            elif ptype in ('int', 'integer'):
+                otype = 'integer'
+            elif ptype in ('float', 'number'):
+                otype = 'number'
+            elif ptype in ('bool', 'boolean'):
+                otype = 'boolean'
+            else:
+                otype = 'string'
+            prop = {'type': otype}
+            if 'description' in pinfo:
+                prop['description'] = pinfo['description']
+            if 'default' in pinfo:
+                prop['default'] = pinfo['default']
+            else:
+                required.append(pname)
+            props[pname] = prop
+        param_schema = { 'type': 'object',
+                            'properties': props,
+                            'additionalProperties': False }
+        if required:
+            param_schema['required'] = required
+        openai_tools.append({
+            'type': 'function',
+            'function': {
+                'name': name,
+                'description': defn.get('description', ''),
+                'parameters': param_schema
+            },
+            'strict': True
+        })
+
     return openai_tools, tool_map
 
 
@@ -165,7 +170,8 @@ def run_llm_handler(
     """
     multimodal = getattr(message, 'media_type', None) == 'audio'
     model = model_audio if multimodal else model_default
-    openai_tools, tool_map = build_openai_tools(tools_list)
+    print(f"[DEBUG] tools_list: {tools_list}")
+    openai_tools, tool_map = build_openai_tools(tools_list, bot=bot, message=message, openai_client=openai_client)
 
     # Prepare chat history
     llm_chat_args = dict(depth=10, mode="thread", system_instruction=system_instruction, multimodal=multimodal)
@@ -207,30 +213,24 @@ def run_llm_handler(
                 fargs = json.loads(call.function.arguments or '{}')
                 if debug:
                     print(f"[DEBUG] Executing {fname} with args {fargs}")
-                try:
-                    result = tool_map[fname](**fargs)
-                    # Check if the result is a file path
-                    file_path = handle_tool_result(result)
-                    if file_path:
-                        if debug:
-                            print(f"[DEBUG] Tool returned a file: {file_path}")
-                        file_paths.append(file_path)
-                        # Convert result to string for tool response
-                        result = f"File processed: {file_path}"
-                    content = json.dumps(result) if not isinstance(result, str) else result
-                    tool_responses.append({
-                        'role': 'tool',
-                        'tool_call_id': call.id,
-                        'name': fname,
-                        'content': content
-                    })
+                result = tool_map[fname](**fargs)
+                # Check if the result is a file path
+                file_path = handle_tool_result(result)
+                if file_path:
                     if debug:
-                        print(f"[DEBUG] {fname} result:", result)
-                except Exception as e:
-                    if debug:
-                        print(f"[ERROR] {fname} failed: {e}")
-                    message.reply_with({ 'type': 'text', 'text': f"Error: {e}" })
-                    return
+                        print(f"[DEBUG] Tool returned a file: {file_path}")
+                    file_paths.append(file_path)
+                    # Convert result to string for tool response
+                    result = f"File processed: {file_path}"
+                content = json.dumps(result) if not isinstance(result, str) else result
+                tool_responses.append({
+                    'role': 'tool',
+                    'tool_call_id': call.id,
+                    'name': fname,
+                    'content': content
+                })
+                if debug:
+                    print(f"[DEBUG] {fname} result:", result)
             messages.append(msg)
             messages.extend(tool_responses)
             calls_made += 1
@@ -273,4 +273,4 @@ def run_llm_handler(
         fallback.update(prepare_file_response(file_paths, message.platform))
     if debug:
         print("[DEBUG] Fallback reply:", fallback)
-    message.reply_with(fallback) 
+    message.reply_with(fallback)
