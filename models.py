@@ -274,7 +274,10 @@ class Tool(models.Model):
         Execute the tool's code in isolation and return its `tool_definition` dict.
         Injects bot, message, and openai_client into the tool's global context if provided.
         """
-        account = message.sender
+        if message is not None:
+            account = message.sender
+        else:
+            account = None
         module = types.ModuleType('tool_module')
         # Inject globals if provided
         if bot is not None:
