@@ -146,7 +146,7 @@ def run_llm_handler(
     model_audio: str = "gpt-4o-audio-preview",
     model_default: str = "o4-mini-2025-04-16",
     system_instruction: Optional[str] = None,
-    max_function_calls: int = 3,
+    max_function_calls: int = 7,
     as_llm_chat_params: Optional[dict] = None,
     tool_choice: str = "auto",
     debug: bool = False,
@@ -283,7 +283,7 @@ def run_llm_handler(
         return
     # Fallback
     content = getattr(last_msg, 'content', '') if last_msg else ''
-    fallback = { 'type': 'text', 'text': content or f"Handled by {bot.name}." }
+    fallback = { 'type': 'text', 'text': content or "Error: Too many tool calls! Seems like this LLM is lost. Try to give it an easier task or provide more hints and contextual info to guide it." }
     # Add any accumulated file paths to the fallback reply
     if file_paths:
         fallback.update(prepare_file_response(file_paths, message.platform))

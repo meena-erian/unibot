@@ -403,7 +403,7 @@ class Bot(models.Model):
         system_instruction: Optional[str] = None,
         depth: int = 10,
         mode: str = "thread",
-        max_function_calls: int = 3,
+        max_function_calls: int = 7,
         openai_client: OpenAI = None,
         request=None,
     ):
