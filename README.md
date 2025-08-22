@@ -120,13 +120,15 @@ python manage.py create_admin_tools
 1. Go to Django admin → Unibot → Bots
 2. Create a new bot with custom Python code
 3. Associate tools with your bot
-4. The bot will automatically get a RequestCategory for message routing
+4. Bots have access to context variables: `bot`, `message`, `account`, `request`, `member`, `openai_client`
+5. The bot will automatically get a RequestCategory for message routing
 
 ### Creating Tools
 1. Go to Django admin → Unibot → Tools
 2. Create reusable tools with Python code
 3. Tools must define a `tool_definition` dictionary
-4. See template examples in `templates/unibot/`
+4. Tools have access to context variables: `bot`, `message`, `account`, `request`, `member`, `openai_client`
+5. See template examples in `templates/unibot/`
 
 ### Managing Credentials
 1. Define credential field schemas using CredentialFieldDefinition

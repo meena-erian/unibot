@@ -163,12 +163,12 @@ def handle_incoming_message(message, bot, tools_list):
     for op in analysis.get("operations", {}).get("bot_operations", []):
         needed_tools.extend(
             t for t in tools_list 
-            if t.get_definition()["name"] == op
+            if t.get_definition(bot=bot, message=message, openai_client=openai_client, request=request)["name"] == op
         )
     for op in analysis.get("operations", {}).get("tool_operations", []):
         needed_tools.extend(
             t for t in tools_list 
-            if t.get_definition()["name"] == op
+            if t.get_definition(bot=bot, message=message, openai_client=openai_client, request=request)["name"] == op
         )
 
     # Build final system instruction with proper string handling
@@ -194,5 +194,6 @@ def handle_incoming_message(message, bot, tools_list):
     return bot.reply_using_llm(
         message,
         tools_list=needed_tools,
-        system_instruction=system_instruction
+        system_instruction=system_instruction,
+        request=request
     )

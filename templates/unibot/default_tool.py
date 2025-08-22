@@ -1,4 +1,18 @@
 # Default tool template for new Tool.code fields
+#
+# CONTEXT VARIABLES AVAILABLE IN TOOL CODE:
+# - bot: The Bot instance processing this request
+# - message: The Message object being processed  
+# - account: The Account/user who sent the message (message.sender)
+# - request: The Request object containing status, category, etc.
+# - member: The Member object if available (request.member)
+# - openai_client: OpenAI client instance
+#
+# You can access these variables directly in your tool functions:
+# - request.id, request.status, request.category_id
+# - message.content, message.sender
+# - account.username, account.email
+# - member.id (if available)
 
 import requests
 from bs4 import BeautifulSoup

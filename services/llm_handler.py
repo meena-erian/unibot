@@ -14,7 +14,7 @@ from unicom.models.message import Message
 from .tool_result_handler import handle_tool_result, prepare_file_response
 
 
-def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=None, openai_client=None) -> (List[dict], Dict[str, Callable]):
+def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=None, openai_client=None, request=None) -> (List[dict], Dict[str, Callable]):
     """
     Build OpenAI tool schema and a map of tool name to run function from a list of tool objects.
     Args:
@@ -26,7 +26,7 @@ def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=Non
     openai_tools = []
     tool_map = {}
     for tool in (tools_list or []):
-        defn = tool.get_definition(bot=bot, message=message, openai_client=openai_client)
+        defn = tool.get_definition(bot=bot, message=message, openai_client=openai_client, request=request)
         if not defn:
             print(f"[DEBUG] Tool {tool} skipped: get_definition() returned None or empty.")
             continue
@@ -150,6 +150,7 @@ def run_llm_handler(
     as_llm_chat_params: Optional[dict] = None,
     tool_choice: str = "auto",
     debug: bool = False,
+    request=None,
     openai_client: OpenAI = None,
 ) -> None:
     """
@@ -171,7 +172,7 @@ def run_llm_handler(
     multimodal = getattr(message, 'media_type', None) == 'audio'
     model = model_audio if multimodal else model_default
     print(f"[DEBUG] tools_list: {tools_list}")
-    openai_tools, tool_map = build_openai_tools(tools_list, bot=bot, message=message, openai_client=openai_client)
+    openai_tools, tool_map = build_openai_tools(tools_list, bot=bot, message=message, openai_client=openai_client, request=request)
 
     # Prepare chat history
     llm_chat_args = dict(depth=10, mode="thread", system_instruction=system_instruction, multimodal=multimodal)
@@ -213,6 +214,8 @@ def run_llm_handler(
                 fargs = json.loads(call.function.arguments or '{}')
                 if debug:
                     print(f"[DEBUG] Executing {fname} with args {fargs}")
+                
+                
                 result = tool_map[fname](**fargs)
                 # Check if the result is a file path
                 file_path = handle_tool_result(result)
@@ -223,6 +226,7 @@ def run_llm_handler(
                     # Convert result to string for tool response
                     result = f"File processed: {file_path}"
                 content = json.dumps(result) if not isinstance(result, str) else result
+                
                 tool_responses.append({
                     'role': 'tool',
                     'tool_call_id': call.id,

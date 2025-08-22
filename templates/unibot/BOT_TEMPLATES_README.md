@@ -1,12 +1,38 @@
+## Context Variables Available in Bot Code
+
+All bots have access to the following context variables when processing requests:
+
+- **`bot`**: The Bot instance processing this request
+- **`message`**: The Message object being processed  
+- **`account`**: The Account/user who sent the message (message.sender)
+- **`request`**: The Request object containing status, category, etc.
+- **`member`**: The Member object if available (request.member)
+- **`openai_client`**: OpenAI client instance
+
+You can access these directly in your bot handler functions:
+```python
+def handle_incoming_message(message, bot, tools_list):
+    user_id = account.id
+    request_id = request.id
+    # Make request available to tools by passing it
+    return bot.reply_using_llm(
+        message, tools_list,
+        system_instruction="You are a helpful AI assistant",
+        request=request  # This passes request context to tools
+    )
+```
+
 ## Basic Bot Template
 
 The simplest bot implementation looks like this:
 
 ```python
 def handle_incoming_message(message, bot, tools_list):
+    # Available globals: bot, message, account, request, member (if available), openai_client
     return bot.reply_using_llm(
         message, tools_list,
-        system_instruction="You are a helpful AI assistant"
+        system_instruction="You are a helpful AI assistant",
+        request=request  # Pass request object to make it available in tools
     )
 ```
 

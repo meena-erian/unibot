@@ -269,10 +269,18 @@ class Tool(models.Model):
             f"Code: \n{self.code}\n"
         )
 
-    def get_definition(self, bot=None, message=None, openai_client=None):
+    def get_definition(self, bot=None, message=None, openai_client=None, request=None):
         """
         Execute the tool's code in isolation and return its `tool_definition` dict.
-        Injects bot, message, and openai_client into the tool's global context if provided.
+        Injects bot, message, request, and openai_client into the tool's global context if provided.
+        
+        Available globals in tool code:
+        - bot: The Bot instance processing this request
+        - message: The Message object being processed
+        - account: The Account/user who sent the message (message.sender)
+        - request: The Request object containing status, category, etc.
+        - member: The Member object if available (request.member)
+        - openai_client: OpenAI client instance
         """
         if message is not None:
             account = message.sender
@@ -286,6 +294,11 @@ class Tool(models.Model):
             module.__dict__["message"] = message
         if account is not None:
             module.__dict__["account"] = account
+        if request is not None:
+            module.__dict__["request"] = request
+            # Also inject member if available
+            if hasattr(request, 'member') and request.member is not None:
+                module.__dict__["member"] = request.member
         if openai_client is not None:
             module.__dict__["openai_client"] = openai_client
         exec(self.code, module.__dict__)
@@ -392,6 +405,7 @@ class Bot(models.Model):
         mode: str = "thread",
         max_function_calls: int = 3,
         openai_client: OpenAI = None,
+        request=None,
     ):
         if openai_client is None:
             openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
@@ -409,6 +423,7 @@ class Bot(models.Model):
             },
             debug=True,
             openai_client=openai_client,
+            request=request,
         )
 
     def process_request(self, req):
@@ -423,8 +438,12 @@ class Bot(models.Model):
             "openai_client": openai_client,
             "bot": self,
             "message": req.message,
-            "account": req.message.sender
+            "account": req.message.sender,
+            "request": req
         })
+        # Also add member if available
+        if hasattr(req, 'member') and req.member is not None:
+            module.__dict__["member"] = req.member
         tools_list = list(self.tools.all())
         try:
             exec(bot_code, module.__dict__)
