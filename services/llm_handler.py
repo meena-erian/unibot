@@ -214,8 +214,14 @@ def run_llm_handler(
                 fargs = json.loads(call.function.arguments or '{}')
                 if debug:
                     print(f"[DEBUG] Executing {fname} with args {fargs}")
-                
-                
+                # Log the tool call in the database
+                message.log_tool_interaction(
+                    tool_call={
+                        "id": call.id,
+                        "name": fname,
+                        "arguments": fargs
+                    }
+                )
                 result = tool_map[fname](**fargs)
                 # Check if the result is a file path
                 file_path = handle_tool_result(result)
@@ -226,7 +232,13 @@ def run_llm_handler(
                     # Convert result to string for tool response
                     result = f"File processed: {file_path}"
                 content = json.dumps(result) if not isinstance(result, str) else result
-                
+                # Log the tool response in the database
+                message.log_tool_interaction(
+                    tool_response={
+                        "call_id": call.id,
+                        "result": result
+                    }
+                )
                 tool_responses.append({
                     'role': 'tool',
                     'tool_call_id': call.id,
