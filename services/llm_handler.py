@@ -169,16 +169,27 @@ def run_llm_handler(
     Returns:
         None (calls message.reply_with with the reply dict).
     """
-    multimodal = getattr(message, 'media_type', None) == 'audio'
-    model = model_audio if multimodal else model_default
-    print(f"[DEBUG] tools_list: {tools_list}")
-    openai_tools, tool_map = build_openai_tools(tools_list, bot=bot, message=message, openai_client=openai_client, request=request)
-
-    # Prepare chat history
-    llm_chat_args = dict(depth=10, mode="thread", system_instruction=system_instruction, multimodal=multimodal)
+    # First get chat history with multimodal=True to check for audio messages
+    llm_chat_args = dict(depth=10, mode="thread", system_instruction=system_instruction, multimodal=True)
     if as_llm_chat_params:
         llm_chat_args.update(as_llm_chat_params)
     messages = message.as_llm_chat(**llm_chat_args)
+
+    # Check if any user messages in the conversation are audio
+    multimodal = False
+    for msg in messages:
+        if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+            for content_block in msg["content"]:
+                if content_block.get("type") == "input_audio":
+                    multimodal = True
+                    break
+            if multimodal:
+                break
+
+    model = model_audio if multimodal else model_default
+    print(f"[DEBUG] tools_list: {tools_list}")
+    print(f"[DEBUG] multimodal detected: {multimodal}, using model: {model}")
+    openai_tools, tool_map = build_openai_tools(tools_list, bot=bot, message=message, openai_client=openai_client, request=request)
     if debug:
         print("[DEBUG] Initial messages:", messages)
         print("[DEBUG] OpenAI tools:", openai_tools)
