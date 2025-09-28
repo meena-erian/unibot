@@ -183,110 +183,101 @@ def run_llm_handler(
         print("[DEBUG] Initial messages:", messages)
         print("[DEBUG] OpenAI tools:", openai_tools)
 
-    calls_made = 0
-    last_msg = None
-    file_paths = []  # Accumulate file paths from tool calls
-    while calls_made < max_function_calls:
-        kwargs = {}
-        if multimodal:
-            kwargs.update({ 'modalities': ['text','audio'],
-                            'audio': { 'voice': 'alloy', 'format': 'opus' } })
-        if openai_tools:
-            kwargs.update({ 'tools': openai_tools, 'tool_choice': tool_choice })
-        if debug:
-            print(f"[DEBUG] Calling OpenAI: model={model}, kwargs={kwargs}")
-        resp = openai_client.chat.completions.create(
-            model=model,
-            messages=messages,
-            **kwargs
-        )
-        msg = resp.choices[0].message
-        last_msg = msg
-        if debug:
-            print("[DEBUG] OpenAI response:", msg)
-        tool_calls = getattr(msg, 'tool_calls', None)
-        if tool_calls:
-            if debug:
-                print(f"[DEBUG] Detected {len(tool_calls)} tool call(s)")
-            tool_responses = []
-            for call in tool_calls:
-                fname = call.function.name
-                fargs = json.loads(call.function.arguments or '{}')
-                if debug:
-                    print(f"[DEBUG] Executing {fname} with args {fargs}")
-                # Log the tool call in the database
-                message.log_tool_interaction(
-                    tool_call={
-                        "id": call.id,
-                        "name": fname,
-                        "arguments": fargs
-                    }
-                )
-                result = tool_map[fname](**fargs)
-                # Check if the result is a file path
-                file_path = handle_tool_result(result)
-                if file_path:
-                    if debug:
-                        print(f"[DEBUG] Tool returned a file: {file_path}")
-                    file_paths.append(file_path)
-                    # Convert result to string for tool response
-                    result = f"File processed: {file_path}"
-                content = json.dumps(result) if not isinstance(result, str) else result
-                # Log the tool response in the database
-                message.log_tool_interaction(
-                    tool_response={
-                        "call_id": call.id,
-                        "result": result
-                    }
-                )
-                tool_responses.append({
-                    'role': 'tool',
-                    'tool_call_id': call.id,
-                    'name': fname,
-                    'content': content
-                })
-                if debug:
-                    print(f"[DEBUG] {fname} result:", result)
-            messages.append(msg)
-            messages.extend(tool_responses)
-            calls_made += 1
-            continue
-        # No tool calls: finalize
-        reply = process_llm_content(msg)
-        # Add any accumulated file paths to the reply before final processing
-        if file_paths:
-            reply.update(prepare_file_response(file_paths, message.platform))
-
-        # If reply is text but the text is empty/whitespace, remove text key and
-        # attempt to infer a better type from any attached file_path.
-        if reply.get('type') == 'text' and (not reply.get('text') or not str(reply['text']).strip()):
-            reply.pop('text', None)
-            fpath = reply.get('file_path')
-            if fpath:
-                # If multiple paths, take first for type inference
-                if isinstance(fpath, list):
-                    fpath = fpath[0]
-                ext = Path(fpath).suffix.lower()
-                if ext in {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}:
-                    reply['type'] = 'image'
-                elif ext in {'.mp3', '.wav', '.opus', '.ogg', '.m4a'}:
-                    reply['type'] = 'audio'
-                else:
-                    reply['type'] = 'file'
-            else:
-                # Nothing to send; fallback to a minimal placeholder to avoid empty text error
-                reply['text'] = '...'  # will be treated as short text
-
-        if debug:
-            print("[DEBUG] Sending final reply:", reply)
-        message.reply_with(reply)
-        return
-    # Fallback
-    content = getattr(last_msg, 'content', '') if last_msg else ''
-    fallback = { 'type': 'text', 'text': content or "Error: Too many tool calls! Seems like this LLM is lost. Try to give it an easier task or provide more hints and contextual info to guide it." }
-    # Add any accumulated file paths to the fallback reply
-    if file_paths:
-        fallback.update(prepare_file_response(file_paths, message.platform))
+    # Single LLM call instead of loop - unicom handles tool call coordination
+    kwargs = {}
+    if multimodal:
+        kwargs.update({ 'modalities': ['text','audio'],
+                        'audio': { 'voice': 'alloy', 'format': 'opus' } })
+    if openai_tools:
+        kwargs.update({ 'tools': openai_tools, 'tool_choice': tool_choice })
     if debug:
-        print("[DEBUG] Fallback reply:", fallback)
-    message.reply_with(fallback)
+        print(f"[DEBUG] Calling OpenAI: model={model}, kwargs={kwargs}")
+    resp = openai_client.chat.completions.create(
+        model=model,
+        messages=messages,
+        **kwargs
+    )
+    msg = resp.choices[0].message
+    if debug:
+        print("[DEBUG] OpenAI response:", msg)
+
+    tool_calls = getattr(msg, 'tool_calls', None)
+    if tool_calls:
+        if debug:
+            print(f"[DEBUG] Detected {len(tool_calls)} tool call(s)")
+
+        # Convert OpenAI tool calls to unicom format
+        tool_call_data = []
+        for call in tool_calls:
+            fname = call.function.name
+            fargs = json.loads(call.function.arguments or '{}')
+            tool_call_data.append({
+                "name": fname,
+                "arguments": fargs,
+                "id": call.id  # Use OpenAI's call ID
+            })
+
+        # Submit all tool calls to unicom (atomic operation)
+        unicom_tool_calls = request.submit_tool_calls(tool_call_data)
+
+        # Execute each tool and respond immediately
+        file_paths = []  # Accumulate file paths from tool calls
+        for i, call in enumerate(tool_calls):
+            fname = call.function.name
+            fargs = json.loads(call.function.arguments or '{}')
+
+            if debug:
+                print(f"[DEBUG] Executing {fname} with args {fargs}")
+
+            # Send user notification
+            # message.reply_with({'text': f'🔧 Using tool: {fname}...'})
+
+            # Execute tool (existing code)
+            result = tool_map[fname](**fargs)
+
+            # Handle file results (existing code)
+            file_path = handle_tool_result(result)
+            if file_path:
+                if debug:
+                    print(f"[DEBUG] Tool returned a file: {file_path}")
+                file_paths.append(file_path)
+                result = f"File processed: {file_path}"
+
+            # Respond to unicom tool call
+            unicom_tool_calls[i].respond(result)
+
+            # Send completion notification
+            # message.reply_with({'text': f'✅ Tool {fname} completed'})
+
+            if debug:
+                print(f"[DEBUG] {fname} result:", result)
+
+        # Child request will be automatically created by unicom when all tool calls are responded to
+        return
+
+    # No tool calls: send final response
+    reply = process_llm_content(msg)
+
+    # If reply is text but the text is empty/whitespace, remove text key and
+    # attempt to infer a better type from any attached file_path.
+    if reply.get('type') == 'text' and (not reply.get('text') or not str(reply['text']).strip()):
+        reply.pop('text', None)
+        fpath = reply.get('file_path')
+        if fpath:
+            # If multiple paths, take first for type inference
+            if isinstance(fpath, list):
+                fpath = fpath[0]
+            ext = Path(fpath).suffix.lower()
+            if ext in {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'}:
+                reply['type'] = 'image'
+            elif ext in {'.mp3', '.wav', '.opus', '.ogg', '.m4a'}:
+                reply['type'] = 'audio'
+            else:
+                reply['type'] = 'file'
+        else:
+            # Nothing to send; fallback to a minimal placeholder to avoid empty text error
+            reply['text'] = '...'  # will be treated as short text
+
+    if debug:
+        print("[DEBUG] Sending final reply:", reply)
+    message.reply_with(reply)

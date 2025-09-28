@@ -431,6 +431,8 @@ class Bot(models.Model):
         Process a single Request object using this bot's code, updating status and error fields as needed.
         Passes the bot instance and its associated tools to the handler.
         """
+        if hasattr(req, 'parent_request') and req.parent_request:
+            print(f"[DEBUG] Processing child request {req.id} from parent {req.parent_request.id}")
         bot_code = self.code or Bot.get_default_code()
         module = types.ModuleType('bot_code')
         openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
