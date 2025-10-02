@@ -396,8 +396,8 @@ Contains template files and examples for bot and tool development.
 - Various CRUD tools (`create_bot_tool.py`, `update_tool_tool.py`, etc.)
 
 **Documentation:**
-- `BOT_TEMPLATES_README.md` - Bot development guide
-- `TOOL_TEMPLATES_README.md` - Tool development guide
+- [`BOT_TEMPLATES_README.md`](templates/unibot/BOT_TEMPLATES_README.md) - Bot development guide
+- [`TOOL_TEMPLATES_README.md`](templates/unibot/TOOL_TEMPLATES_README.md) - Tool development guide
 
 ---
 
@@ -429,6 +429,8 @@ mkdir -p data/definitions/tools data/definitions/bots
 
 ### Creating Your First Bot
 
+> 📖 **For detailed bot development guidance, see [`BOT_TEMPLATES_README.md`](templates/unibot/BOT_TEMPLATES_README.md)**
+
 1. **Create Bot Definition File**
 Create `data/definitions/bots/my_first_bot.py`:
 
@@ -457,6 +459,8 @@ python manage.py run_worker
 ```
 
 ### Creating Tools
+
+> 📖 **For detailed tool development guidance, see [`TOOL_TEMPLATES_README.md`](templates/unibot/TOOL_TEMPLATES_README.md)**
 
 1. **Create Tool Definition File**
 Create `data/definitions/tools/calculator.py`:
@@ -618,6 +622,8 @@ Tools have access to:
 
 ### Custom Tool Development
 
+> 📖 **For detailed tool development guidance, see [`TOOL_TEMPLATES_README.md`](templates/unibot/TOOL_TEMPLATES_README.md)**
+
 **Advanced Tool Pattern:**
 ```python
 from unibot.services.credentials import get_credentials
@@ -659,6 +665,8 @@ tool_definition = {
 ```
 
 ### Bot Code Examples
+
+> 📖 **For detailed bot development guidance, see [`BOT_TEMPLATES_README.md`](templates/unibot/BOT_TEMPLATES_README.md)**
 
 **Specialized Bot with Custom Logic:**
 ```python
