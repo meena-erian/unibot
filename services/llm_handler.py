@@ -256,11 +256,11 @@ def run_llm_handler(
             # Execute tool with tool_call in context
             result = tool_map_with_context[fname](**fargs)
 
-            # If tool returns None, it handles its own response - mark as IN_PROGRESS
+            # If tool returns None, it handles its own response - mark as ACTIVE
             if result is None:
-                tool_call_instance.start_processing()
+                tool_call_instance.mark_active()
                 if debug:
-                    print(f"[DEBUG] {fname} returned None - tool will handle response later (marked IN_PROGRESS)")
+                    print(f"[DEBUG] {fname} returned None - tool is now ACTIVE and waiting for async response")
                 continue
 
             # Handle file results (existing code)
