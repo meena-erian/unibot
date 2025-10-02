@@ -269,17 +269,18 @@ class Tool(models.Model):
             f"Code: \n{self.code}\n"
         )
 
-    def get_definition(self, bot=None, message=None, openai_client=None, request=None):
+    def get_definition(self, bot=None, message=None, openai_client=None, request=None, tool_call=None):
         """
         Execute the tool's code in isolation and return its `tool_definition` dict.
-        Injects bot, message, request, and openai_client into the tool's global context if provided.
-        
+        Injects bot, message, request, tool_call, and openai_client into the tool's global context if provided.
+
         Available globals in tool code:
         - bot: The Bot instance processing this request
         - message: The Message object being processed
         - account: The Account/user who sent the message (message.sender)
         - request: The Request object containing status, category, etc.
         - member: The Member object if available (request.member)
+        - tool_call: The ToolCall instance for this tool execution (available during execution)
         - openai_client: OpenAI client instance
         """
         if message is not None:
@@ -299,6 +300,8 @@ class Tool(models.Model):
             # Also inject member if available
             if hasattr(request, 'member') and request.member is not None:
                 module.__dict__["member"] = request.member
+        if tool_call is not None:
+            module.__dict__["tool_call"] = tool_call
         if openai_client is not None:
             module.__dict__["openai_client"] = openai_client
         exec(self.code, module.__dict__)

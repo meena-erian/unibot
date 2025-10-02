@@ -14,11 +14,12 @@ from unicom.models.message import Message
 from .tool_result_handler import handle_tool_result, prepare_file_response
 
 
-def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=None, openai_client=None, request=None) -> (List[dict], Dict[str, Callable]):
+def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=None, openai_client=None, request=None, tool_call=None) -> (List[dict], Dict[str, Callable]):
     """
     Build OpenAI tool schema and a map of tool name to run function from a list of tool objects.
     Args:
         tools_list: List of tool objects, each with a get_definition() method.
+        tool_call: Optional ToolCall instance to pass to tool execution context.
     Returns:
         openai_tools: List of OpenAI tool schemas.
         tool_map: Dict mapping tool name to its run function.
@@ -26,7 +27,7 @@ def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=Non
     openai_tools = []
     tool_map = {}
     for tool in (tools_list or []):
-        defn = tool.get_definition(bot=bot, message=message, openai_client=openai_client, request=request)
+        defn = tool.get_definition(bot=bot, message=message, openai_client=openai_client, request=request, tool_call=tool_call)
         if not defn:
             print(f"[DEBUG] Tool {tool} skipped: get_definition() returned None or empty.")
             continue
@@ -189,7 +190,8 @@ def run_llm_handler(
     model = model_audio if multimodal else model_default
     print(f"[DEBUG] tools_list: {tools_list}")
     print(f"[DEBUG] multimodal detected: {multimodal}, using model: {model}")
-    openai_tools, tool_map = build_openai_tools(tools_list, bot=bot, message=message, openai_client=openai_client, request=request)
+    # Note: tool_call will be set per-tool during execution, passing None here for initial schema building
+    openai_tools, tool_map = build_openai_tools(tools_list, bot=bot, message=message, openai_client=openai_client, request=request, tool_call=None)
     if debug:
         print("[DEBUG] Initial messages:", messages)
         print("[DEBUG] OpenAI tools:", openai_tools)
@@ -231,20 +233,35 @@ def run_llm_handler(
         # Submit all tool calls to unicom (atomic operation)
         unicom_tool_calls = request.submit_tool_calls(tool_call_data)
 
-        # Execute each tool and respond immediately
+        # Execute each tool and respond immediately unless the tool returns None (which means the tool handles its own response asynchronously)
         file_paths = []  # Accumulate file paths from tool calls
         for i, call in enumerate(tool_calls):
             fname = call.function.name
             fargs = json.loads(call.function.arguments or '{}')
+            tool_call_instance = unicom_tool_calls[i]
 
             if debug:
                 print(f"[DEBUG] Executing {fname} with args {fargs}")
 
-            # Send user notification
-            # message.reply_with({'text': f'🔧 Using tool: {fname}...'})
+            # Rebuild tool map with tool_call context for this specific tool
+            _, tool_map_with_context = build_openai_tools(
+                tools_list,
+                bot=bot,
+                message=message,
+                openai_client=openai_client,
+                request=request,
+                tool_call=tool_call_instance
+            )
 
-            # Execute tool (existing code)
-            result = tool_map[fname](**fargs)
+            # Execute tool with tool_call in context
+            result = tool_map_with_context[fname](**fargs)
+
+            # If tool returns None, it handles its own response - mark as IN_PROGRESS
+            if result is None:
+                tool_call_instance.start_processing()
+                if debug:
+                    print(f"[DEBUG] {fname} returned None - tool will handle response later (marked IN_PROGRESS)")
+                continue
 
             # Handle file results (existing code)
             file_path = handle_tool_result(result)
@@ -254,11 +271,8 @@ def run_llm_handler(
                 file_paths.append(file_path)
                 result = f"File processed: {file_path}"
 
-            # Respond to unicom tool call
-            unicom_tool_calls[i].respond(result)
-
-            # Send completion notification
-            # message.reply_with({'text': f'✅ Tool {fname} completed'})
+            # Respond to unicom tool call automatically
+            tool_call_instance.respond(result)
 
             if debug:
                 print(f"[DEBUG] {fname} result:", result)

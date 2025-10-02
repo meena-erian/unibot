@@ -3,10 +3,11 @@
 All tools have access to the following context variables when executed:
 
 - **`bot`**: The Bot instance processing this request
-- **`message`**: The Message object being processed  
+- **`message`**: The Message object being processed
 - **`account`**: The Account/user who sent the message (message.sender)
 - **`request`**: The Request object containing status, category, etc.
 - **`member`**: The Member object if available (request.member)
+- **`tool_call`**: The ToolCall instance for this tool execution (see Delayed Responses below)
 - **`openai_client`**: OpenAI client instance
 
 You can access these directly in your tool functions:
@@ -17,6 +18,8 @@ def my_tool():
     message_content = message.content
     if member:
         member_info = member.id
+    # Access the tool call instance
+    tool_call_id = tool_call.call_id if tool_call else None
 ```
 
 ## Basic Tool Template
@@ -47,6 +50,70 @@ tool_definition = {
     "run": summarize_webpage
 }
 ```
+
+## Delayed Tool Responses
+
+By default, tools are expected to return a result immediately, which the system automatically sends to the LLM. However, some tools need to defer their response (e.g., waiting for user confirmation, long-running processes, scheduled tasks).
+
+**To defer a response, return `None`:**
+
+```python
+def ask_user_confirmation(question: str) -> str:
+    """Ask user a question and wait for their response via button click"""
+    from unicom.services.telegram.create_inline_keyboard import create_inline_keyboard, create_callback_button
+
+    # Send message with buttons linked to this tool call
+    message.reply_with({
+        'text': question,
+        'reply_markup': create_inline_keyboard([
+            [create_callback_button("Yes", {"action": "confirm", "value": True}, message=message, tool_call=tool_call)],
+            [create_callback_button("No", {"action": "confirm", "value": False}, message=message, tool_call=tool_call)]
+        ])
+    })
+
+    # Return None to indicate this tool will respond later
+    # The system marks the tool call as IN_PROGRESS and waits
+    return None
+
+tool_definition = {
+    "name": "ask_user_confirmation",
+    "description": "Ask the user a yes/no question and wait for their response",
+    "parameters": {
+        "question": {"type": "string", "description": "The question to ask"}
+    },
+    "run": ask_user_confirmation
+}
+```
+
+Then in your callback handler, respond to the tool call:
+
+```python
+from django.dispatch import receiver
+from unicom.signals import telegram_callback_received
+
+@receiver(telegram_callback_received)
+def handle_confirmations(sender, callback_execution, tool_call, original_message, **kwargs):
+    data = callback_execution.callback_data
+
+    if isinstance(data, dict) and data.get('action') == 'confirm':
+        # Respond to the tool call - this notifies the LLM
+        if tool_call:
+            tool_call.respond({
+                'confirmed': data['value'],
+                'timestamp': str(timezone.now())
+            })
+
+        # Send confirmation to user
+        original_message.reply_with({
+            'text': f'✅ Response recorded: {"Yes" if data["value"] else "No"}'
+        })
+```
+
+**Key points:**
+- Returning `None` marks the tool call as `IN_PROGRESS`
+- Store the `tool_call` instance (it's available in your tool context)
+- Call `tool_call.respond(result)` later to complete the tool call
+- The system automatically creates a child request when all pending tool calls are completed
 
 ## Using Credentials in a Tool
 

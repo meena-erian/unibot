@@ -179,6 +179,7 @@ AI bot configurations with custom Python code and tool associations.
 - `account` - Account/user who sent the message
 - `request` - Request object with status and metadata
 - `member` - Member object if available
+- `tool_call` - The ToolCall instance for this tool execution (only available in tools during execution)
 - `openai_client` - OpenAI client instance
 
 ### `models.py` - Tool Model
@@ -187,8 +188,9 @@ Reusable functions that bots can execute during conversations.
 **Key Features:**
 - Python code with `tool_definition` dictionary
 - OpenAI function calling schema generation
-- Same context variables as bots
+- Same context variables as bots, plus `tool_call` instance during execution
 - Template loading for admin interface
+- Support for deferred responses (return `None` to handle response later)
 
 **Required Structure:**
 ```python
@@ -589,7 +591,12 @@ Tools have access to:
 - `account` - User account that sent the message
 - `request` - Request object with processing status
 - `member` - Member object if available
+- `tool_call` - ToolCall instance for this execution (use `tool_call.call_id` to track, return `None` to defer response)
 - `openai_client` - Pre-configured OpenAI client
+
+**Deferred Response Pattern:**
+- Return a value: Tool response sent immediately to LLM
+- Return `None`: Tool call marked as `IN_PROGRESS`, tool handles response later via `tool_call.respond(result)`
 
 ### Security Model
 
