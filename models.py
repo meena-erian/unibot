@@ -277,13 +277,16 @@ class Tool(models.Model):
         Available globals in tool code:
         - bot: The Bot instance processing this request
         - message: The Message object being processed
-        - account: The Account/user who sent the message (message.sender)
+        - account: The Account/user from the request (request.account, fallback to message.sender)
         - request: The Request object containing status, category, etc.
         - member: The Member object if available (request.member)
         - tool_call: The ToolCall instance for this tool execution (available during execution)
         - openai_client: OpenAI client instance
         """
-        if message is not None:
+        # Use request.account (correctly propagated for child requests) instead of message.sender
+        if request is not None and hasattr(request, 'account') and request.account is not None:
+            account = request.account
+        elif message is not None:
             account = message.sender
         else:
             account = None
@@ -443,7 +446,7 @@ class Bot(models.Model):
             "openai_client": openai_client,
             "bot": self,
             "message": req.message,
-            "account": req.message.sender,
+            "account": req.account,  # Use req.account (correctly propagated) instead of req.message.sender
             "request": req
         })
         # Also add member if available
