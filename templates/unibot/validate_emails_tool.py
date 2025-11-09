@@ -38,7 +38,7 @@ def validate_emails(emails: Union[List[str], str]) -> str:
         email = email.strip()
         
         try:
-            response = requests.post(endpoint, json={'to_email': email}, timeout=10)
+            response = requests.post(endpoint, json={'to_email': email}, timeout=120)
             response.raise_for_status()
             data = response.json()
             
