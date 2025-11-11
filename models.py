@@ -407,7 +407,7 @@ class Bot(models.Model):
         model_audio: str = "gpt-4o-audio-preview",
         model_default: str = "o4-mini-2025-04-16",
         system_instruction: Optional[str] = None,
-        depth: int = 10,
+        depth: int = 129,
         mode: str = "thread",
         max_function_calls: int = 7,
         openai_client: OpenAI = None,

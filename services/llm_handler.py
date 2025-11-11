@@ -171,7 +171,7 @@ def run_llm_handler(
         None (calls message.reply_with with the reply dict).
     """
     # First get chat history with multimodal=True to check for audio messages
-    llm_chat_args = dict(depth=10, mode="thread", system_instruction=system_instruction, multimodal=True)
+    llm_chat_args = dict(depth=129, mode="thread", system_instruction=system_instruction, multimodal=True)
     if as_llm_chat_params:
         llm_chat_args.update(as_llm_chat_params)
     messages = message.as_llm_chat(**llm_chat_args)
