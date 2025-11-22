@@ -124,7 +124,17 @@ def request_credentials(account: Account, bot: Bot, message: Message, credential
         f"Please use [this secure link]({absolute_url}) to set them up\n" +
         "Your credentials are encrypted and only accessible to you."
     )
-    message.reply_with({"text": msg})
+    # Use HTML for WebChat so the setup link is clickable; other platforms keep Markdown text
+    if message.platform == "WebChat":
+        html_msg = (
+            "To use this tool, you need to securely provide the following credentials: "
+            f"{', '.join([c.label for c in credentials])}.<br>"
+            f'Please use <a href="{absolute_url}" target="_blank" rel="noopener noreferrer">this secure link</a> to set them up.<br>'
+            "Your credentials are encrypted and only accessible to you."
+        )
+        message.reply_with({"type": "html", "html": html_msg, "text": html_msg})
+    else:
+        message.reply_with({"text": msg})
 
     # Poll for session completion or expiration
     timeout = 0 # 180  # seconds
@@ -148,4 +158,3 @@ def request_credentials(account: Account, bot: Bot, message: Message, credential
         waited += poll_interval
     # Timeout
     return None
-
