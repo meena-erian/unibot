@@ -112,8 +112,35 @@ def handle_confirmations(sender, callback_execution, tool_call, original_message
 **Key points:**
 - Returning `None` marks the tool call as `IN_PROGRESS`
 - Store the `tool_call` instance (it's available in your tool context)
-- Call `tool_call.respond(result)` later to complete the tool call
+- Call `tool_call.respond(result)` later to complete the tool call (the system will wrap as `{"status": "...", ...}`)
+- You can optionally pass a `status` to `tool_call.respond(result, status="SUCCESS|WARNING|ERROR")`; if omitted it defaults to `SUCCESS`
 - The system automatically creates a child request when all pending tool calls are completed
+
+## Handling Expected Errors/Warnings Without Breaking the Conversation
+
+If your tool encounters a user-facing error that should be reported to the LLM (and the user) without failing the request pipeline, raise `ToolHandlerError`:
+
+```python
+def fetch_invoice(invoice_id: str):
+    invoice = lookup_invoice(invoice_id)
+    if not invoice:
+        # Sends an ERROR result back to the LLM but keeps the flow alive
+        raise ToolHandlerError("Invoice not found", status="ERROR", payload={"reason": "missing_invoice", "invoice_id": invoice_id})
+    return {"invoice": invoice}  # Will be wrapped with status=SUCCESS by the system
+
+def check_inventory(sku: str):
+    stock = current_stock(sku)
+    if stock < 5:
+        # Sends a WARNING result back to the LLM; conversation continues
+        raise ToolHandlerWarning("Low stock", payload={"sku": sku, "stock": stock})
+    return {"stock": stock}
+```
+
+- `ToolHandlerError` and `ToolHandlerWarning` are injected into tool globals (or import from `unibot.services.tool_exceptions`).
+- `status` defaults to `ERROR`/`WARNING` if not provided.
+- `payload` is optional; if omitted, the error/warning message string is sent.
+- Tool returns are wrapped automatically: return values become `{"status": "SUCCESS", ...}`, warnings become `{"status": "WARNING", ...}`, errors become `{"status": "ERROR", ...}`.
+- Unexpected exceptions still fail the request (same as before), so reserve these exceptions for known/handled cases.
 
 ## Using Credentials in a Tool
 

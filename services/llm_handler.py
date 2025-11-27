@@ -12,6 +12,7 @@ from typing import Callable, Dict, List, Optional, Type, Union
 from openai import OpenAI
 from unicom.models.message import Message
 from .tool_result_handler import handle_tool_result, prepare_file_response
+from .tool_exceptions import ToolHandlerError, ToolHandlerWarning
 
 
 def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=None, openai_client=None, request=None, tool_call=None) -> (List[dict], Dict[str, Callable]):
@@ -254,7 +255,19 @@ def run_llm_handler(
             )
 
             # Execute tool with tool_call in context
-            result = tool_map_with_context[fname](**fargs)
+            status = 'SUCCESS'
+            try:
+                result = tool_map_with_context[fname](**fargs)
+            except ToolHandlerWarning as e:
+                status = getattr(e, 'status', 'WARNING')
+                result = e.payload if e.payload is not None else {"warning": str(e)}
+                if debug:
+                    print(f"[DEBUG] {fname} raised ToolHandlerWarning with status {status}: {result}")
+            except ToolHandlerError as e:
+                status = getattr(e, 'status', 'ERROR')
+                result = e.payload if e.payload is not None else {"error": str(e)}
+                if debug:
+                    print(f"[DEBUG] {fname} raised ToolHandlerError with status {status}: {result}")
 
             # If tool returns None, it handles its own response - mark as ACTIVE
             if result is None:
@@ -272,7 +285,7 @@ def run_llm_handler(
                 result = f"File processed: {file_path}"
 
             # Respond to unicom tool call automatically
-            tool_call_instance.respond(result)
+            tool_call_instance.respond(result, status=status)
 
             if debug:
                 print(f"[DEBUG] {fname} result:", result)

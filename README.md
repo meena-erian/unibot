@@ -191,6 +191,8 @@ Reusable functions that bots can execute during conversations.
 - Same context variables as bots, plus `tool_call` instance during execution
 - Template loading for admin interface
 - Support for deferred responses (return `None` to handle response later)
+- Handled errors/warnings via `ToolHandlerError`/`ToolHandlerWarning` to return user-facing failures without breaking the request
+- All tool outputs are wrapped with a status for the LLM (`SUCCESS` by default, or `WARNING`/`ERROR` when raised/passed)
 
 **Required Structure:**
 ```python

@@ -10,6 +10,7 @@ from openai import OpenAI
 import reversion
 from django.utils import timezone
 from datetime import timedelta
+from unibot.services.tool_exceptions import ToolHandlerError, ToolHandlerWarning
 from cryptography.fernet import Fernet
 import base64
 import uuid
@@ -307,6 +308,9 @@ class Tool(models.Model):
             module.__dict__["tool_call"] = tool_call
         if openai_client is not None:
             module.__dict__["openai_client"] = openai_client
+        # Provide ToolHandlerError so tools can signal handled failures
+        module.__dict__["ToolHandlerError"] = ToolHandlerError
+        module.__dict__["ToolHandlerWarning"] = ToolHandlerWarning
         exec(self.code, module.__dict__)
         return getattr(module, 'tool_definition', None)
 
