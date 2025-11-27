@@ -13,6 +13,7 @@ from openai import OpenAI
 from unicom.models.message import Message
 from .tool_result_handler import handle_tool_result, prepare_file_response
 from .tool_exceptions import ToolHandlerError, ToolHandlerWarning
+from django.db import transaction
 
 
 def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=None, openai_client=None, request=None, tool_call=None) -> (List[dict], Dict[str, Callable], Dict[str, List[str]]):
@@ -249,67 +250,74 @@ def run_llm_handler(
         # Submit all tool calls to unicom (atomic operation)
         unicom_tool_calls = request.submit_tool_calls(tool_call_data)
 
-        # Execute each tool and respond immediately unless the tool returns None (which means the tool handles its own response asynchronously)
-        file_paths = []  # Accumulate file paths from tool calls
-        for i, call in enumerate(tool_calls):
-            fname = call.function.name
-            fargs = json.loads(call.function.arguments or '{}')
-            tool_call_instance = unicom_tool_calls[i]
+        def execute_tool_calls():
+            # Execute each tool and respond immediately unless the tool returns None (which means the tool handles its own response asynchronously)
+            file_paths = []  # Accumulate file paths from tool calls
+            for i, call in enumerate(tool_calls):
+                fname = call.function.name
+                fargs = json.loads(call.function.arguments or '{}')
+                tool_call_instance = unicom_tool_calls[i]
 
-            if debug:
-                print(f"[DEBUG] Executing {fname} with args {fargs}")
-
-            # Rebuild tool map with tool_call context for this specific tool
-            _, tool_map_with_context, auto_params_map_with_context = build_openai_tools(
-                tools_list,
-                bot=bot,
-                message=message,
-                openai_client=openai_client,
-                request=request,
-                tool_call=tool_call_instance
-            )
-
-            # Execute tool with tool_call in context
-            status = 'SUCCESS'
-            auto_params = auto_params_map_with_context.get(fname, [])
-            # Strip auto-injected params the tool didn't declare
-            for auto_param in auto_params:
-                fargs.pop(auto_param, None)
-            try:
-                result = tool_map_with_context[fname](**fargs)
-            except ToolHandlerWarning as e:
-                status = getattr(e, 'status', 'WARNING')
-                result = e.payload if e.payload is not None else {"warning": str(e)}
                 if debug:
-                    print(f"[DEBUG] {fname} raised ToolHandlerWarning with status {status}: {result}")
-            except ToolHandlerError as e:
-                status = getattr(e, 'status', 'ERROR')
-                result = e.payload if e.payload is not None else {"error": str(e)}
+                    print(f"[DEBUG] Executing {fname} with args {fargs}")
+
+                # Rebuild tool map with tool_call context for this specific tool
+                _, tool_map_with_context, auto_params_map_with_context = build_openai_tools(
+                    tools_list,
+                    bot=bot,
+                    message=message,
+                    openai_client=openai_client,
+                    request=request,
+                    tool_call=tool_call_instance
+                )
+
+                # Execute tool with tool_call in context
+                status = 'SUCCESS'
+                auto_params = auto_params_map_with_context.get(fname, [])
+                # Strip auto-injected params the tool didn't declare
+                for auto_param in auto_params:
+                    fargs.pop(auto_param, None)
+                try:
+                    result = tool_map_with_context[fname](**fargs)
+                except ToolHandlerWarning as e:
+                    status = getattr(e, 'status', 'WARNING')
+                    result = e.payload if e.payload is not None else {"warning": str(e)}
+                    if debug:
+                        print(f"[DEBUG] {fname} raised ToolHandlerWarning with status {status}: {result}")
+                except ToolHandlerError as e:
+                    status = getattr(e, 'status', 'ERROR')
+                    result = e.payload if e.payload is not None else {"error": str(e)}
+                    if debug:
+                        print(f"[DEBUG] {fname} raised ToolHandlerError with status {status}: {result}")
+
+                # If tool returns None, it handles its own response - mark as ACTIVE
+                if result is None:
+                    tool_call_instance.mark_active()
+                    if debug:
+                        print(f"[DEBUG] {fname} returned None - tool is now ACTIVE and waiting for async response")
+                    continue
+
+                # Handle file results (existing code)
+                file_path = handle_tool_result(result)
+                if file_path:
+                    if debug:
+                        print(f"[DEBUG] Tool returned a file: {file_path}")
+                    file_paths.append(file_path)
+                    result = f"File processed: {file_path}"
+
+                # Respond to unicom tool call automatically
+                tool_call_instance.respond(result, status=status)
+
                 if debug:
-                    print(f"[DEBUG] {fname} raised ToolHandlerError with status {status}: {result}")
+                    print(f"[DEBUG] {fname} result:", result)
 
-            # If tool returns None, it handles its own response - mark as ACTIVE
-            if result is None:
-                tool_call_instance.mark_active()
-                if debug:
-                    print(f"[DEBUG] {fname} returned None - tool is now ACTIVE and waiting for async response")
-                continue
+            # Child request will be automatically created by unicom when all tool calls are responded to
 
-            # Handle file results (existing code)
-            file_path = handle_tool_result(result)
-            if file_path:
-                if debug:
-                    print(f"[DEBUG] Tool returned a file: {file_path}")
-                file_paths.append(file_path)
-                result = f"File processed: {file_path}"
-
-            # Respond to unicom tool call automatically
-            tool_call_instance.respond(result, status=status)
-
-            if debug:
-                print(f"[DEBUG] {fname} result:", result)
-
-        # Child request will be automatically created by unicom when all tool calls are responded to
+        # Ensure tool call messages commit before executing tools
+        if transaction.get_connection().in_atomic_block:
+            transaction.on_commit(execute_tool_calls)
+        else:
+            execute_tool_calls()
         return
 
     # No tool calls: send final response
