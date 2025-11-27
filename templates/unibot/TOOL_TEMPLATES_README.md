@@ -142,6 +142,12 @@ def check_inventory(sku: str):
 - Tool returns are wrapped automatically: return values become `{"status": "SUCCESS", ...}`, warnings become `{"status": "WARNING", ...}`, errors become `{"status": "ERROR", ...}`.
 - Unexpected exceptions still fail the request (same as before), so reserve these exceptions for known/handled cases.
 
+## LLM Progress Updates (Auto-Injected Parameter)
+
+- The platform automatically injects a required parameter `progress_updates_for_user` into every tool schema to force the LLM to state (in one line) what it is doing and why; this is logged and visible in chat history and ToolCall records.
+- If your tool does not declare this parameter, the platform strips it before calling your function, so existing signatures remain compatible.
+- If you want to use it inside your tool, simply add `progress_updates_for_user: str` to your function signature and tool parameters to access the provided text.
+
 ## Using Credentials in a Tool
 
 If your tool requires credentials, use `get_credentials`:

@@ -15,7 +15,7 @@ from .tool_result_handler import handle_tool_result, prepare_file_response
 from .tool_exceptions import ToolHandlerError, ToolHandlerWarning
 
 
-def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=None, openai_client=None, request=None, tool_call=None) -> (List[dict], Dict[str, Callable]):
+def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=None, openai_client=None, request=None, tool_call=None) -> (List[dict], Dict[str, Callable], Dict[str, List[str]]):
     """
     Build OpenAI tool schema and a map of tool name to run function from a list of tool objects.
     Args:
@@ -27,6 +27,7 @@ def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=Non
     """
     openai_tools = []
     tool_map = {}
+    auto_params_map: Dict[str, List[str]] = {}
     for tool in (tools_list or []):
         defn = tool.get_definition(bot=bot, message=message, openai_client=openai_client, request=request, tool_call=tool_call)
         if not defn:
@@ -43,7 +44,20 @@ def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=Non
             print(f"[DEBUG] Tool {tool} ('{name}') skipped: definition missing 'run' function. Definition: {defn}")
             continue
         # Build JSON Schema for parameters
-        raw_params = defn.get('parameters', {})
+        raw_params = defn.get('parameters', {}) or {}
+        auto_params = []
+
+        # Inject progress_updates_for_user if missing to force LLM to describe intent
+        if 'progress_updates_for_user' not in raw_params:
+            raw_params = dict(raw_params)
+            raw_params['progress_updates_for_user'] = {
+                "type": "string",
+                "description": "In one concise line, explain what you are doing and why (user-visible progress update)."
+            }
+            auto_params.append('progress_updates_for_user')
+
+        if auto_params:
+            auto_params_map[name] = auto_params
         props = {}
         required = []
         for pname, pinfo in raw_params.items():
@@ -81,7 +95,7 @@ def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=Non
             'strict': True
         })
 
-    return openai_tools, tool_map
+    return openai_tools, tool_map, auto_params_map
 
 
 def process_llm_content(msg: object) -> dict:
@@ -192,7 +206,7 @@ def run_llm_handler(
     print(f"[DEBUG] tools_list: {tools_list}")
     print(f"[DEBUG] multimodal detected: {multimodal}, using model: {model}")
     # Note: tool_call will be set per-tool during execution, passing None here for initial schema building
-    openai_tools, tool_map = build_openai_tools(tools_list, bot=bot, message=message, openai_client=openai_client, request=request, tool_call=None)
+    openai_tools, tool_map, auto_params_map = build_openai_tools(tools_list, bot=bot, message=message, openai_client=openai_client, request=request, tool_call=None)
     if debug:
         print("[DEBUG] Initial messages:", messages)
         print("[DEBUG] OpenAI tools:", openai_tools)
@@ -228,7 +242,8 @@ def run_llm_handler(
             tool_call_data.append({
                 "name": fname,
                 "arguments": fargs,
-                "id": call.id  # Use OpenAI's call ID
+                "id": call.id,  # Use OpenAI's call ID
+                "auto_params": auto_params_map.get(fname, []),
             })
 
         # Submit all tool calls to unicom (atomic operation)
@@ -245,7 +260,7 @@ def run_llm_handler(
                 print(f"[DEBUG] Executing {fname} with args {fargs}")
 
             # Rebuild tool map with tool_call context for this specific tool
-            _, tool_map_with_context = build_openai_tools(
+            _, tool_map_with_context, auto_params_map_with_context = build_openai_tools(
                 tools_list,
                 bot=bot,
                 message=message,
@@ -256,6 +271,10 @@ def run_llm_handler(
 
             # Execute tool with tool_call in context
             status = 'SUCCESS'
+            auto_params = auto_params_map_with_context.get(fname, [])
+            # Strip auto-injected params the tool didn't declare
+            for auto_param in auto_params:
+                fargs.pop(auto_param, None)
             try:
                 result = tool_map_with_context[fname](**fargs)
             except ToolHandlerWarning as e:

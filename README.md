@@ -193,6 +193,7 @@ Reusable functions that bots can execute during conversations.
 - Support for deferred responses (return `None` to handle response later)
 - Handled errors/warnings via `ToolHandlerError`/`ToolHandlerWarning` to return user-facing failures without breaking the request
 - All tool outputs are wrapped with a status for the LLM (`SUCCESS` by default, or `WARNING`/`ERROR` when raised/passed)
+- Auto-injected `progress_updates_for_user` parameter requires the LLM to provide a one-line “what/why” progress update; tools can ignore it or accept it explicitly
 
 **Required Structure:**
 ```python
