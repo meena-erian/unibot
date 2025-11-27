@@ -1,5 +1,6 @@
 from unibot.models import Tool
 import reversion
+from unibot.services.tool_exceptions import ToolHandlerError
 
 def create_tool(name: str, code: str) -> dict:
     """Creates a new tool"""
@@ -11,9 +12,9 @@ def create_tool(name: str, code: str) -> dict:
                 code=code
             )
             reversion.set_comment("Initial revision via create_tool tool")
-        return {"success": True, "tool_id": tool.id}
+        return {"tool_id": tool.id}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        raise ToolHandlerError(str(e))
 
 tool_definition = {
     "name": "create_tool",

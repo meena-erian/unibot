@@ -1,5 +1,6 @@
 from unibot.models import Bot, Tool
 import reversion
+from unibot.services.tool_exceptions import ToolHandlerError
 
 def create_bot(name: str, code: str, tool_ids: list[int] = None) -> dict:
     """Creates a new bot with specified tools"""
@@ -14,9 +15,9 @@ def create_bot(name: str, code: str, tool_ids: list[int] = None) -> dict:
                 tools = Tool.objects.filter(id__in=tool_ids)
                 bot.tools.set(tools)
             reversion.set_comment("Initial revision via create_bot tool")
-        return {"success": True, "bot_id": bot.id}
+        return {"bot_id": bot.id}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        raise ToolHandlerError(str(e))
 
 tool_definition = {
     "name": "create_bot",

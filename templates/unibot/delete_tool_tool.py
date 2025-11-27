@@ -1,6 +1,7 @@
 from django.core.exceptions import ObjectDoesNotExist
 from unibot.models import Tool
 import reversion
+from unibot.services.tool_exceptions import ToolHandlerError
 
 def delete_tool(tool_id: int) -> dict:
     """Deletes a tool"""
@@ -9,11 +10,11 @@ def delete_tool(tool_id: int) -> dict:
             tool = Tool.objects.get(id=tool_id)
             reversion.set_comment("Final revision before deletion via delete_tool tool")
             tool.delete()
-        return {"success": True}
+        return {"tool_id": tool_id}
     except ObjectDoesNotExist:
-        return {"success": False, "error": f"Tool with ID {tool_id} not found"}
+        raise ToolHandlerError(f"Tool with ID {tool_id} not found")
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        raise ToolHandlerError(str(e))
 
 tool_definition = {
     "name": "delete_tool",

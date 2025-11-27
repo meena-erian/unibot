@@ -11,6 +11,8 @@
 #
 # Input should be specific search criteria and requirements, not just keywords.
 
+from unibot.services.tool_exceptions import ToolHandlerError
+
 def gpt_search(search_query: str) -> str:
     """
     Performs intelligent web search using OpenAI's GPT search preview model.
@@ -53,7 +55,8 @@ Keep your responses focused and avoid unnecessary verbosity unless the query spe
         return response.choices[0].message.content
         
     except Exception as e:
-        return f"Error performing search: {str(e)}"
+        # Surface handled error so conversation continues
+        raise ToolHandlerError(f"Error performing search: {str(e)}")
 
 
 tool_definition = {

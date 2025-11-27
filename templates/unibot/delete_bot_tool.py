@@ -1,6 +1,7 @@
 from django.core.exceptions import ObjectDoesNotExist
 from unibot.models import Bot
 import reversion
+from unibot.services.tool_exceptions import ToolHandlerError
 
 def delete_bot(bot_id: int) -> dict:
     """Deletes a bot"""
@@ -9,11 +10,11 @@ def delete_bot(bot_id: int) -> dict:
             bot = Bot.objects.get(id=bot_id)
             reversion.set_comment("Final revision before deletion via delete_bot tool")
             bot.delete()
-        return {"success": True}
+        return {"bot_id": bot_id}
     except ObjectDoesNotExist:
-        return {"success": False, "error": f"Bot with ID {bot_id} not found"}
+        raise ToolHandlerError(f"Bot with ID {bot_id} not found")
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        raise ToolHandlerError(str(e))
 
 tool_definition = {
     "name": "delete_bot",

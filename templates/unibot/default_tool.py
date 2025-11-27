@@ -17,6 +17,7 @@
 import requests
 from bs4 import BeautifulSoup
 import re
+from unibot.services.tool_exceptions import ToolHandlerError
 
 def summarize_webpage(url: str, max_sentences: int = 3) -> str:
     """
@@ -36,7 +37,8 @@ def summarize_webpage(url: str, max_sentences: int = 3) -> str:
         summary = ' '.join(sentences[:max_sentences])
         return summary if summary else 'No summary could be generated.'
     except Exception as e:
-        return f"Error fetching or summarizing the web page: {e}"
+        # Surface a handled error to the LLM without breaking the conversation
+        raise ToolHandlerError(f"Error fetching or summarizing the web page: {e}")
 
 
 tool_definition = {

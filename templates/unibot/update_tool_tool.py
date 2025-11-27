@@ -2,6 +2,7 @@ from django.core.exceptions import ObjectDoesNotExist
 from unibot.models import Tool
 from typing import Optional
 import reversion
+from unibot.services.tool_exceptions import ToolHandlerError
 
 def update_tool(tool_id: int, name: Optional[str] = None, code: Optional[str] = None) -> dict:
     """Updates an existing tool"""
@@ -14,11 +15,11 @@ def update_tool(tool_id: int, name: Optional[str] = None, code: Optional[str] = 
                 tool.code = code
             tool.save()
             reversion.set_comment("Programmatic update via update_tool tool")
-        return {"success": True}
+        return {"tool_id": tool.id}
     except ObjectDoesNotExist:
-        return {"success": False, "error": f"Tool with ID {tool_id} not found"}
+        raise ToolHandlerError(f"Tool with ID {tool_id} not found")
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        raise ToolHandlerError(str(e))
 
 tool_definition = {
     "name": "update_tool",

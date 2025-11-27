@@ -3,6 +3,7 @@ from typing import List, Union
 from urllib.parse import urljoin
 from django.conf import settings
 import re
+from unibot.services.tool_exceptions import ToolHandlerError, ToolHandlerWarning
 
 
 def validate_emails(emails: Union[List[str], str]) -> str:
@@ -21,7 +22,7 @@ def validate_emails(emails: Union[List[str], str]) -> str:
                getattr(settings, 'REACHER_BASE_URL', None)
     
     if not base_url:
-        return "❌ No Reacher API service is configured. Please set REACHER_HOSTNAME, REACHER_HOST, or REACHER_BASE_URL in your settings."
+        raise ToolHandlerError("No Reacher API service is configured. Please set REACHER_HOSTNAME, REACHER_HOST, or REACHER_BASE_URL in your settings.")
     
     base_url = base_url.strip()
     if not base_url.startswith(('http://', 'https://')):
@@ -55,14 +56,17 @@ def validate_emails(emails: Union[List[str], str]) -> str:
                 results.append(f"❓ {email}: Unknown status ({status})")
                 
         except requests.RequestException as e:
-            return f"❌ Reacher API error: Failed to validate emails. Service may be down or unreachable. Error: {str(e)}"
+            raise ToolHandlerError(f"Reacher API error: Failed to validate emails. Service may be down or unreachable. Error: {str(e)}")
         except ValueError:
-            return f"❌ Reacher API error: Service returned invalid response format."
+            raise ToolHandlerError("Reacher API error: Service returned invalid response format.")
     
     if not results:
-        return "No valid email addresses provided for validation."
+        raise ToolHandlerWarning("No valid email addresses provided for validation.")
     
-    return "Email Validation Results:\n" + "\n".join(results)
+    return {
+        "summary": "Email Validation Results",
+        "details": results,
+    }
 
 
 tool_definition = {

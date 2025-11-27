@@ -2,6 +2,7 @@ import time
 import requests
 from typing import List, Dict, Any, Optional
 from unibot.services.credentials import get_credentials
+from unibot.services.tool_exceptions import ToolHandlerError, ToolHandlerWarning
 
 # Google Places API endpoints
 PLACES_SEARCH_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
@@ -50,10 +51,7 @@ def collect_google_places_leads(query: str, location: str, radius: int = 50000, 
         {"key": CRED_KEY, "label": "Google Places API Key for Lead Collector", "type": "password", "placeholder": "Enter your Google Places API key"}
     ])
     if creds is None:
-        return {
-            "success": False,
-            "error": "API key is not set. A link to configure it has been sent to you.",
-        }
+        raise ToolHandlerError("API key is not set. A link to configure it has been sent to you.")
     api_key = creds[CRED_KEY]
 
     params = {
@@ -90,8 +88,10 @@ def collect_google_places_leads(query: str, location: str, radius: int = 50000, 
         if not next_page_token:
             break  # No more pages
 
+    if not leads:
+        raise ToolHandlerWarning("No leads were collected from Google Places.", payload={"query": query})
+
     return {
-        "success": True,
         "query": query,
         "total_collected": len(leads),
         "leads": leads,
