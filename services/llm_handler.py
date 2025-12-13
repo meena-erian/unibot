@@ -59,31 +59,56 @@ def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=Non
 
         if auto_params:
             auto_params_map[name] = auto_params
-        props = {}
-        required = []
+        props: dict = {}
+        required: list = []
         for pname, pinfo in raw_params.items():
             ptype = pinfo.get('type', 'string')
-            if ptype in ('str', 'string'):
-                otype = 'string'
-            elif ptype in ('int', 'integer'):
-                otype = 'integer'
-            elif ptype in ('float', 'number'):
-                otype = 'number'
-            elif ptype in ('bool', 'boolean'):
-                otype = 'boolean'
+            # Preserve enum/items for the LLM; map common aliases for scalars.
+            if isinstance(ptype, str):
+                if ptype in ('str', 'string'):
+                    otype = 'string'
+                elif ptype in ('int', 'integer'):
+                    otype = 'integer'
+                elif ptype in ('float', 'number'):
+                    otype = 'number'
+                elif ptype in ('bool', 'boolean'):
+                    otype = 'boolean'
+                else:
+                    otype = ptype
             else:
-                otype = 'string'
+                # Allow JSON Schema style: list/union types
+                otype = ptype
+
             prop = {'type': otype}
-            if 'description' in pinfo:
-                prop['description'] = pinfo['description']
+            # Carry through common JSON Schema fields if present.
+            for key in (
+                'description',
+                'enum',
+                'items',
+                'properties',
+                'additionalProperties',
+                'format',
+                'minimum',
+                'maximum',
+                'minItems',
+                'maxItems',
+                'anyOf',
+                'oneOf',
+                'allOf',
+            ):
+                if key in pinfo:
+                    prop[key] = pinfo[key]
             if 'default' in pinfo:
                 prop['default'] = pinfo['default']
             else:
                 required.append(pname)
             props[pname] = prop
-        param_schema = { 'type': 'object',
-                            'properties': props,
-                            'additionalProperties': False }
+
+        param_schema = {
+            'type': 'object',
+            'properties': props,
+            'additionalProperties': False,
+        }
         if required:
             param_schema['required'] = required
         openai_tools.append({
