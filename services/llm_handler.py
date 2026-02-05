@@ -8,12 +8,16 @@ import re
 import json
 import os
 from pathlib import Path
+import logging
 from typing import Callable, Dict, List, Optional, Type, Union
 from openai import OpenAI
 from unicom.models.message import Message
 from .tool_result_handler import handle_tool_result, prepare_file_response
 from .tool_exceptions import ToolHandlerError, ToolHandlerWarning
 from django.db import transaction
+from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=None, openai_client=None, request=None, tool_call=None) -> (List[dict], Dict[str, Callable], Dict[str, List[str]]):
@@ -314,6 +318,13 @@ def run_llm_handler(
                     result = e.payload if e.payload is not None else {"error": str(e)}
                     if debug:
                         print(f"[DEBUG] {fname} raised ToolHandlerError with status {status}: {result}")
+                except Exception as exc:  # pragma: no cover - guard against unexpected tool crashes
+                    logger.exception("Unexpected failure while executing %s", fname)
+                    payload = {"error": "Unexpected tool error"}
+                    if getattr(settings, "DEBUG", False):
+                        payload["details"] = str(exc)
+                    tool_call_instance.respond(payload, status="ERROR")
+                    continue
 
                 # If tool returns None, it handles its own response - mark as ACTIVE
                 if result is None:
