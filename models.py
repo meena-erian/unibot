@@ -416,6 +416,9 @@ class Bot(models.Model):
         max_function_calls: int = 7,
         openai_client: OpenAI = None,
         request=None,
+        api_mode: str = "chat_completions",
+        stream: bool = False,
+        stream_event_sink=None,
     ):
         if openai_client is None:
             openai_client = OpenAI(api_key=settings.OPENAI_API_KEY)
@@ -434,6 +437,9 @@ class Bot(models.Model):
             debug=True,
             openai_client=openai_client,
             request=request,
+            api_mode=api_mode,
+            stream=stream,
+            stream_event_sink=stream_event_sink,
         )
 
     def process_request(self, req):

@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import logging
+from types import SimpleNamespace
 from typing import Callable, Dict, List, Optional, Type, Union
 from openai import OpenAI
 from unicom.models.message import Message
@@ -198,6 +199,9 @@ def run_llm_handler(
     debug: bool = False,
     request=None,
     openai_client: OpenAI = None,
+    api_mode: str = "chat_completions",
+    stream: bool = False,
+    stream_event_sink=None,
 ) -> None:
     """
     Modular LLM handler for bots supporting audio, text, images, and tool use.
@@ -241,6 +245,9 @@ def run_llm_handler(
         print("[DEBUG] Initial messages:", messages)
         print("[DEBUG] OpenAI tools:", openai_tools)
 
+    if api_mode not in {"chat_completions", "responses"}:
+        raise ValueError("api_mode must be 'chat_completions' or 'responses'")
+
     # Single LLM call instead of loop - unicom handles tool call coordination
     kwargs = {}
     if multimodal:
@@ -250,12 +257,41 @@ def run_llm_handler(
         kwargs.update({ 'tools': openai_tools, 'tool_choice': tool_choice })
     if debug:
         print(f"[DEBUG] Calling OpenAI: model={model}, kwargs={kwargs}")
-    resp = openai_client.chat.completions.create(
-        model=model,
-        messages=messages,
-        **kwargs
-    )
-    msg = resp.choices[0].message
+    if api_mode == "responses":
+        if multimodal:
+            raise ValueError(
+                "Responses mode does not yet support Unibot audio output; "
+                "select a text-capable model or use chat_completions."
+            )
+        from unicom.services.llm.responses import create_response
+
+        result = create_response(
+            client=openai_client,
+            model=model,
+            messages=messages,
+            tools=openai_tools,
+            stream=stream,
+            event_sink=stream_event_sink,
+            tool_choice=tool_choice if openai_tools else None,
+        )
+        tool_calls = [
+            SimpleNamespace(
+                id=call.call_id,
+                function=SimpleNamespace(
+                    name=call.name,
+                    arguments=json.dumps(call.arguments),
+                ),
+            )
+            for call in result.tool_calls
+        ]
+        msg = SimpleNamespace(content=result.text, tool_calls=tool_calls)
+    else:
+        resp = openai_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            **kwargs
+        )
+        msg = resp.choices[0].message
     if debug:
         print("[DEBUG] OpenAI response:", msg)
 
