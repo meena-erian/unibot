@@ -13,12 +13,23 @@ from types import SimpleNamespace
 from typing import Callable, Dict, List, Optional, Type, Union
 from openai import OpenAI
 from unicom.models.message import Message
+from unicom.models.tool_call import ToolCall
 from .tool_result_handler import handle_tool_result, prepare_file_response
 from .tool_exceptions import ToolHandlerError, ToolHandlerWarning
 from django.db import transaction
 from django.conf import settings
 
 logger = logging.getLogger(__name__)
+
+
+def _request_was_superseded(request):
+    if request is None:
+        return False
+    initial_request = request.initial_request or request
+    return initial_request.message.chat.messages.filter(
+        is_outgoing=False,
+        timestamp__gt=initial_request.message.timestamp,
+    ).exclude(media_type__in=['tool_call', 'tool_response']).exists()
 
 
 def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=None, openai_client=None, request=None, tool_call=None) -> (List[dict], Dict[str, Callable], Dict[str, List[str]]):
@@ -319,6 +330,11 @@ def run_llm_handler(
             # Execute each tool and respond immediately unless the tool returns None (which means the tool handles its own response asynchronously)
             file_paths = []  # Accumulate file paths from tool calls
             for i, call in enumerate(tool_calls):
+                if _request_was_superseded(request):
+                    request.tool_calls.filter(
+                        status__in=['PENDING', 'IN_PROGRESS', 'ACTIVE']
+                    ).update(status='INTERRUPTED')
+                    return
                 fname = call.function.name
                 fargs = json.loads(call.function.arguments or '{}')
                 tool_call_instance = unicom_tool_calls[i]
@@ -393,6 +409,8 @@ def run_llm_handler(
         return
 
     # No tool calls: send final response
+    if _request_was_superseded(request):
+        return
     reply = process_llm_content(msg)
 
     # If reply is text but the text is empty/whitespace, remove text key and

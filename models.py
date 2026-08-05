@@ -1,4 +1,4 @@
-from django.db import models
+from django.db import models, transaction
 import os
 from django.conf import settings
 from unicom.models import RequestCategory, Message, Account
@@ -18,6 +18,14 @@ import json
 from django.core.validators import RegexValidator, EmailValidator
 from django.core.exceptions import ValidationError
 import logging
+
+
+def _request_was_superseded(request):
+    initial_request = request.initial_request or request
+    return initial_request.message.chat.messages.filter(
+        is_outgoing=False,
+        timestamp__gt=initial_request.message.timestamp,
+    ).exclude(media_type__in=['tool_call', 'tool_response']).exists()
 
 # Create your models here.
 
@@ -447,16 +455,29 @@ class Bot(models.Model):
         Process a single Request object using this bot's code, updating status and error fields as needed.
         Passes the bot instance and its associated tools to the handler.
         """
-        # If this is a user interrupt immediately after a tool_call or tool_response (within 5 minutes), skip LLM processing. (The 
-        # LLM will respond through the request created when the tool response arrives and this is to avoid double processing.)
+        from unicom.models import ToolCall
+
+        # New user input always wins over unfinished work in the same chat.
         if req.message.is_outgoing is False and req.message.media_type not in ['tool_call', 'tool_response']:
-            prev_msg = req.message.chat.messages.filter(timestamp__lt=req.message.timestamp).order_by('-timestamp').first()
-            if prev_msg and prev_msg.media_type in ['tool_call', 'tool_response']:
-                delta = (req.message.timestamp - prev_msg.timestamp).total_seconds()
-                if delta < 300:
-                    req.status = 'COMPLETED'
-                    req.save(update_fields=['status'])
-                    return
+            with transaction.atomic():
+                ToolCall.objects.select_for_update().filter(
+                    tool_call_message__chat=req.message.chat,
+                    tool_call_message__timestamp__lt=req.message.timestamp,
+                    status__in=['PENDING', 'IN_PROGRESS', 'ACTIVE'],
+                ).update(status='INTERRUPTED', completed_at=timezone.now())
+                type(req).objects.filter(
+                    message__chat=req.message.chat,
+                    message__timestamp__lt=req.message.timestamp,
+                    parent_request__isnull=False,
+                    status__in=[
+                        'PENDING', 'IDENTIFYING', 'CATEGORIZING',
+                        'CATEGORY_LIST_SENT', 'QUEUED',
+                    ],
+                ).update(status='COMPLETED')
+        elif req.parent_request and _request_was_superseded(req):
+            req.status = 'COMPLETED'
+            req.save(update_fields=['status'])
+            return True
 
         if hasattr(req, 'parent_request') and req.parent_request:
             print(f"[DEBUG] Processing child request {req.id} from parent {req.parent_request.id}")
