@@ -213,6 +213,7 @@ def run_llm_handler(
     api_mode: str = "chat_completions",
     stream: bool = False,
     stream_event_sink=None,
+    native_responses_tools: Optional[List[dict]] = None,
 ) -> None:
     """
     Modular LLM handler for bots supporting audio, text, images, and tool use.
@@ -284,6 +285,7 @@ def run_llm_handler(
             stream=stream,
             event_sink=stream_event_sink,
             tool_choice=tool_choice if openai_tools else None,
+            native_tools=native_responses_tools,
         )
         tool_calls = [
             SimpleNamespace(
@@ -295,7 +297,7 @@ def run_llm_handler(
             )
             for call in result.tool_calls
         ]
-        msg = SimpleNamespace(content=result.text, tool_calls=tool_calls)
+        msg = SimpleNamespace(content=result.content or result.text, tool_calls=tool_calls)
     else:
         resp = openai_client.chat.completions.create(
             model=model,
