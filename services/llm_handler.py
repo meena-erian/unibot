@@ -327,15 +327,16 @@ def run_llm_handler(
 
         # Submit all tool calls to unicom (atomic operation)
         unicom_tool_calls = request.submit_tool_calls(tool_call_data)
+        if not unicom_tool_calls:
+            # A newer user turn won the request lock while this LLM call was in flight.
+            return
 
         def execute_tool_calls():
             # Execute each tool and respond immediately unless the tool returns None (which means the tool handles its own response asynchronously)
             file_paths = []  # Accumulate file paths from tool calls
             for i, call in enumerate(tool_calls):
                 if _request_was_superseded(request):
-                    request.tool_calls.filter(
-                        status__in=['PENDING', 'IN_PROGRESS', 'ACTIVE']
-                    ).update(status='INTERRUPTED')
+                    ToolCall.interrupt_unresolved(request.tool_calls.all())
                     return
                 fname = call.function.name
                 fargs = json.loads(call.function.arguments or '{}')

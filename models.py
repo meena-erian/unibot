@@ -462,11 +462,12 @@ class Bot(models.Model):
         # New user input always wins over unfinished work in the same chat.
         if req.message.is_outgoing is False and req.message.media_type not in ['tool_call', 'tool_response']:
             with transaction.atomic():
-                ToolCall.objects.select_for_update().filter(
+                interrupted = ToolCall.objects.select_for_update().filter(
                     tool_call_message__chat=req.message.chat,
                     tool_call_message__timestamp__lt=req.message.timestamp,
                     status__in=['PENDING', 'IN_PROGRESS', 'ACTIVE'],
-                ).update(status='INTERRUPTED', completed_at=timezone.now())
+                )
+                ToolCall.interrupt_unresolved(interrupted)
                 type(req).objects.filter(
                     message__chat=req.message.chat,
                     message__timestamp__lt=req.message.timestamp,
