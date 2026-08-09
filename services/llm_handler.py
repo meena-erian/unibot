@@ -22,6 +22,38 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 
 
+def _validated_nested_required(tool_name: str, parameter_name: str, schema: dict):
+    """Return a valid nested JSON Schema required list, if one was supplied."""
+    if 'required' not in schema:
+        return None
+
+    required = schema['required']
+    properties = schema.get('properties')
+    if not isinstance(required, list) or not all(isinstance(key, str) for key in required):
+        raise ValueError(
+            f"Tool {tool_name!r} parameter {parameter_name!r} must define "
+            "'required' as a list of property names."
+        )
+    if not isinstance(properties, dict):
+        raise ValueError(
+            f"Tool {tool_name!r} parameter {parameter_name!r} defines "
+            "'required' without an object 'properties' mapping."
+        )
+    unknown = [key for key in required if key not in properties]
+    if unknown:
+        raise ValueError(
+            f"Tool {tool_name!r} parameter {parameter_name!r} requires "
+            f"unknown properties: {', '.join(unknown)}."
+        )
+    missing = [key for key in properties if key not in required]
+    if missing:
+        raise ValueError(
+            f"Tool {tool_name!r} parameter {parameter_name!r} must require every "
+            f"property in strict mode; missing: {', '.join(missing)}."
+        )
+    return required
+
+
 def _request_was_superseded(request):
     if request is None:
         return False
@@ -114,6 +146,9 @@ def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=Non
             ):
                 if key in pinfo:
                     prop[key] = pinfo[key]
+            nested_required = _validated_nested_required(name, pname, pinfo)
+            if nested_required is not None:
+                prop['required'] = nested_required
             if 'default' in pinfo:
                 prop['default'] = pinfo['default']
             else:
