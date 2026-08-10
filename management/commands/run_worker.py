@@ -1,5 +1,7 @@
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.db.models import Q
+from django.utils import timezone
 from unicom.models.request import Request
 from unibot.models import Bot
 import importlib.util
@@ -8,6 +10,22 @@ import time
 from django.conf import settings
 from openai import OpenAI
 import traceback
+
+
+def claim_due_retry(request, *, now=None):
+    """Transition one already-locked failed request back to the work queue."""
+    if request.status != 'FAILED':
+        return False
+    claimed_at = now or timezone.now()
+    request.status = 'QUEUED'
+    request.retry_count += 1
+    request.last_retried_at = claimed_at
+    request.next_retry_at = None
+    request.save(update_fields=[
+        'status', 'retry_count', 'last_retried_at', 'next_retry_at',
+    ])
+    return True
+
 
 class Command(BaseCommand):
     help = 'Run the bot worker to process requests.'
@@ -38,12 +56,21 @@ class Command(BaseCommand):
                     continue
                 categories = list(bot_map.keys())
                 # Get requests for these categories
-                qs = Request.objects.select_for_update(skip_locked=True).filter(category_id__in=categories, status=status)
+                qs = Request.objects.select_for_update(skip_locked=True).filter(category_id__in=categories)
+                if status == 'QUEUED':
+                    qs = qs.filter(
+                        Q(status='QUEUED')
+                        | Q(status='FAILED', next_retry_at__lte=timezone.now())
+                    )
+                else:
+                    qs = qs.filter(status=status)
+                qs = qs.order_by('created_at')
                 if limit:
                     qs = qs[:limit]
                 processed = 0
                 with transaction.atomic():
                     for req in qs:
+                        claim_due_retry(req)
                         bot = bot_map.get(req.category_id)
                         if not bot:
                             self.stderr.write(self.style.ERROR(f'No bot found for category {req.category_id}'))
@@ -57,4 +84,4 @@ class Command(BaseCommand):
                 if processed == 0:
                     time.sleep(sleep_time)
         except KeyboardInterrupt:
-            self.stdout.write(self.style.WARNING('Worker stopped by user.')) 
+            self.stdout.write(self.style.WARNING('Worker stopped by user.'))

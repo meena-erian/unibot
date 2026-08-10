@@ -458,6 +458,10 @@ class Bot(models.Model):
         Passes the bot instance and its associated tools to the handler.
         """
         from unicom.models import ToolCall
+        from unibot.services.request_retries import schedule_retry
+
+        req.last_attempt_at = timezone.now()
+        req.save(update_fields=['last_attempt_at'])
 
         # New user input always wins over unfinished work in the same chat.
         if req.message.is_outgoing is False and req.message.media_type not in ['tool_call', 'tool_response']:
@@ -514,10 +518,21 @@ class Bot(models.Model):
             # Pass message, bot instance, and tools list
             handler(req.message, self, tools_list)
             req.status = 'COMPLETED'
-            req.save(update_fields=['status'])
+            req.error = None
+            req.failure_kind = ''
+            req.next_retry_at = None
+            req.retry_exhausted_at = None
+            req.save(update_fields=[
+                'status', 'error', 'failure_kind', 'next_retry_at',
+                'retry_exhausted_at',
+            ])
             return True
         except Exception as e:
             req.status = 'FAILED'
             req.error = traceback.format_exc()
-            req.save(update_fields=['status', 'error'])
+            schedule_retry(req, e)
+            req.save(update_fields=[
+                'status', 'error', 'failure_kind', 'next_retry_at',
+                'retry_exhausted_at',
+            ])
             return False
