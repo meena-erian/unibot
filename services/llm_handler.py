@@ -348,6 +348,19 @@ def run_llm_handler(
         if debug:
             print(f"[DEBUG] Detected {len(tool_calls)} tool call(s)")
 
+        # A Responses result can contain user-facing prose before its function
+        # calls. Persist it before creating the tool messages so refreshes and
+        # every renderer preserve the provider's actual chronological order.
+        # Mark it as non-final so Dashboard completion notifications wait for
+        # the eventual response after the tool continuation.
+        preamble = process_llm_content(msg)
+        if (
+            preamble.get('type') == 'text'
+            and str(preamble.get('text') or '').strip()
+        ):
+            preamble['_message_raw'] = {'assistant_phase': 'tool_preamble'}
+            message.reply_with(preamble)
+
         # Convert OpenAI tool calls to unicom format
         tool_call_data = []
         for call in tool_calls:
