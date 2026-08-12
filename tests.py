@@ -39,13 +39,16 @@ class OpenAIToolSchemaTests(SimpleTestCase):
         self.assertEqual(viewport["required"], ["width", "height"])
         self.assertFalse(viewport["additionalProperties"])
 
-    def test_flat_schema_is_unchanged(self):
+    def test_flat_schema_requires_properties_with_defaults_in_strict_mode(self):
         parameters = self._build_parameters({
             "query": {"type": "string", "description": "Search query."},
             "limit": {"type": "integer", "default": 10},
         })
 
-        self.assertEqual(parameters["required"], ["query", "progress_updates_for_user"])
+        self.assertEqual(
+            parameters["required"],
+            ["query", "limit", "progress_updates_for_user"],
+        )
         self.assertEqual(
             parameters["properties"]["limit"],
             {"type": "integer", "default": 10},

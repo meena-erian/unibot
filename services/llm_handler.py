@@ -151,8 +151,11 @@ def build_openai_tools(tools_list: Optional[List[object]], bot=None, message=Non
                 prop['required'] = nested_required
             if 'default' in pinfo:
                 prop['default'] = pinfo['default']
-            else:
-                required.append(pname)
+            # OpenAI strict function schemas require every property to appear
+            # in `required`, including properties that advertise a default.
+            # The default still documents the preferred value for the model
+            # and remains useful to non-strict consumers.
+            required.append(pname)
             props[pname] = prop
 
         param_schema = {
