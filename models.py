@@ -459,6 +459,15 @@ class Bot(models.Model):
         """
         from unicom.models import ToolCall
         from unibot.services.request_retries import schedule_retry
+        from unicom.services.chat_handoff import chat_allows_automation
+
+        # A request may have been queued before a chat was handed to a human.
+        # Re-check at execution time so the handoff is authoritative.
+        if not chat_allows_automation(req.message.chat):
+            req.status = 'COMPLETED'
+            req.error = None
+            req.save(update_fields=['status', 'error'])
+            return True
 
         req.last_attempt_at = timezone.now()
         req.save(update_fields=['last_attempt_at'])

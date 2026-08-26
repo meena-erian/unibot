@@ -3,6 +3,7 @@ import importlib.util
 from django.core.management.base import BaseCommand
 from django.conf import settings
 from unibot.models import Tool, Bot
+from unicom.models import Channel
 
 
 class Command(BaseCommand):
@@ -142,6 +143,8 @@ class Command(BaseCommand):
                 
                 # Get bot_tools list if it exists
                 bot_tools = getattr(module, 'bot_tools', [])
+                bot_category_is_public = getattr(module, 'bot_category_is_public', None)
+                bot_allowed_channels = getattr(module, 'bot_allowed_channels', None)
                 
                 try:
                     # Check if bot already exists by name
@@ -160,6 +163,11 @@ class Command(BaseCommand):
                         
                         # Update tool associations
                         self.update_bot_tools(existing_bot, bot_tools, dry_run)
+                        if bot_category_is_public is not None and existing_bot.request_category:
+                            existing_bot.request_category.is_public = bool(bot_category_is_public)
+                            if not dry_run:
+                                existing_bot.request_category.save(update_fields=['is_public'])
+                        self.update_bot_channels(existing_bot, bot_allowed_channels, dry_run)
                     else:
                         # Create new bot
                         self.stdout.write(f'  Creating new bot: {bot_name}')
@@ -171,6 +179,10 @@ class Command(BaseCommand):
                             )
                             # Set up tool associations
                             self.update_bot_tools(new_bot, bot_tools, dry_run=False)
+                            if bot_category_is_public is not None and new_bot.request_category:
+                                new_bot.request_category.is_public = bool(bot_category_is_public)
+                                new_bot.request_category.save(update_fields=['is_public'])
+                            self.update_bot_channels(new_bot, bot_allowed_channels, dry_run=False)
                         self.stdout.write(self.style.SUCCESS(f'  ✓ Bot {bot_name} created'))
                         
                 except Exception as e:
@@ -211,6 +223,36 @@ class Command(BaseCommand):
                 self.stdout.write(self.style.SUCCESS(f'    ✓ Tools updated for {bot.name}'))
             else:
                 self.stdout.write(f'    Tools for {bot.name} already up-to-date')
+
+    def update_bot_channels(self, bot, channel_definitions, dry_run):
+        """Optionally sync a bot category's explicit Unicom channels.
+
+        Omitted definitions preserve historical unrestricted-channel behavior.
+        """
+        if channel_definitions is None or not bot.request_category:
+            return
+        channels = []
+        for definition in channel_definitions:
+            lookup = {
+                'name': definition['name'],
+                'platform': definition['platform'],
+            }
+            channel = Channel.objects.filter(**lookup).first()
+            if channel is None:
+                self.stdout.write(f"    Creating channel: {definition['name']}")
+                if dry_run:
+                    continue
+                channel = Channel.objects.create(
+                    **lookup,
+                    active=definition.get('active', True),
+                    config=definition.get('config', {}),
+                )
+            channels.append(channel)
+        if not dry_run:
+            bot.request_category.allowed_channels.set(channels)
+        self.stdout.write(self.style.SUCCESS(
+            f"    ✓ Channels for {bot.name}: {[item['name'] for item in channel_definitions]}"
+        ))
 
         # Create a summary
         if not dry_run:
