@@ -254,6 +254,36 @@ def run_llm_handler(
                 "api_mode='chat_completions' when tools are enabled"
             )
         responses_kwargs = dict(responses_options or {})
+
+        # ``Message.as_llm_chat`` intentionally returns Chat Completions
+        # content blocks for broad provider compatibility.  The Responses
+        # API uses the equivalent ``input_*`` block names, so normalize only
+        # at this boundary and leave the shared message representation intact.
+        def _responses_content(value):
+            if not isinstance(value, list):
+                return value
+            normalized = []
+            for block in value:
+                if not isinstance(block, dict):
+                    normalized.append(block)
+                    continue
+                block = dict(block)
+                block_type = block.get("type")
+                if block_type == "text":
+                    block["type"] = "input_text"
+                elif block_type == "image_url":
+                    image_url = block.get("image_url")
+                    if isinstance(image_url, dict):
+                        image_url = image_url.get("url")
+                    block = {"type": "input_image", "image_url": image_url}
+                normalized.append(block)
+            return normalized
+
+        messages = [
+            {**item, "content": _responses_content(item.get("content"))}
+            if isinstance(item, dict) else item
+            for item in messages
+        ]
         if not stream:
             response = openai_client.responses.create(
                 model=model,
