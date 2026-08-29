@@ -16,7 +16,11 @@ class Command(BaseCommand):
         parser.add_argument('--bot-id', type=int, help='ID of the bot to use (optional)')
         parser.add_argument('--status', type=str, help='Status of requests to process (default: QUEUED)', default='QUEUED')
         parser.add_argument('--limit', type=int, help='Limit number of requests to process per loop')
-        parser.add_argument('--sleep', type=int, help='Seconds to sleep between loops', default=2)
+        parser.add_argument(
+            '--sleep', type=float,
+            help='Seconds to wait when the queue is empty (default: 0.1)',
+            default=0.1,
+        )
 
     def handle(self, *args, **options):
         bot_id = options.get('bot_id')
