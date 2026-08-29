@@ -245,6 +245,11 @@ def run_llm_handler(
     if api_mode not in ("chat_completions", "responses"):
         raise ValueError("api_mode must be 'chat_completions' or 'responses'")
     if api_mode == "responses":
+        if openai_tools:
+            raise NotImplementedError(
+                "Responses API tool calls are not supported yet; use "
+                "api_mode='chat_completions' when tools are enabled"
+            )
         response = openai_client.responses.create(
             model=model,
             input=messages,
