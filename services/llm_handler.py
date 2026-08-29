@@ -198,6 +198,7 @@ def run_llm_handler(
     debug: bool = False,
     request=None,
     openai_client: OpenAI = None,
+    api_mode: str = "chat_completions",
 ) -> None:
     """
     Modular LLM handler for bots supporting audio, text, images, and tool use.
@@ -240,6 +241,15 @@ def run_llm_handler(
     if debug:
         print("[DEBUG] Initial messages:", messages)
         print("[DEBUG] OpenAI tools:", openai_tools)
+
+    if api_mode not in ("chat_completions", "responses"):
+        raise ValueError("api_mode must be 'chat_completions' or 'responses'")
+    if api_mode == "responses":
+        response = openai_client.responses.create(
+            model=model,
+            input=messages,
+        )
+        return message.reply_with({'type': 'text', 'text': response.output_text})
 
     # Single LLM call instead of loop - unicom handles tool call coordination
     kwargs = {}
