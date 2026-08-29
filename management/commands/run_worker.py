@@ -37,24 +37,38 @@ class Command(BaseCommand):
                     time.sleep(sleep_time)
                     continue
                 categories = list(bot_map.keys())
-                # Get requests for these categories
-                qs = Request.objects.select_for_update(skip_locked=True).filter(category_id__in=categories, status=status)
-                if limit:
-                    qs = qs[:limit]
                 processed = 0
-                with transaction.atomic():
-                    for req in qs:
-                        bot = bot_map.get(req.category_id)
-                        if not bot:
-                            self.stderr.write(self.style.ERROR(f'No bot found for category {req.category_id}'))
-                            continue
-                        result = bot.process_request(req)
-                        if result:
-                            processed += 1
-                            self.stdout.write(self.style.SUCCESS(f'Processed request {req.id}'))
-                        else:
-                            self.stderr.write(self.style.ERROR(f'Failed to process request {req.id}: {getattr(req, "error", "Unknown error")}'))
+                while limit is None or processed < limit:
+                    # Claim and commit one request before doing provider or tool work.
+                    # This prevents long external calls from holding row locks and makes
+                    # incremental message updates visible to web processes immediately.
+                    with transaction.atomic():
+                        req = (
+                            Request.objects.select_for_update(skip_locked=True)
+                            .filter(category_id__in=categories, status=status)
+                            .order_by('created_at')
+                            .first()
+                        )
+                        if req is None:
+                            break
+                        req.status = 'PROCESSING'
+                        req.error = None
+                        req.save(update_fields=['status', 'error'])
+
+                    bot = bot_map.get(req.category_id)
+                    if not bot:
+                        req.status = 'FAILED'
+                        req.error = f'No bot found for category {req.category_id}'
+                        req.save(update_fields=['status', 'error'])
+                        self.stderr.write(self.style.ERROR(req.error))
+                        continue
+                    result = bot.process_request(req)
+                    if result:
+                        processed += 1
+                        self.stdout.write(self.style.SUCCESS(f'Processed request {req.id}'))
+                    else:
+                        self.stderr.write(self.style.ERROR(f'Failed to process request {req.id}: {getattr(req, "error", "Unknown error")}'))
                 if processed == 0:
                     time.sleep(sleep_time)
         except KeyboardInterrupt:
-            self.stdout.write(self.style.WARNING('Worker stopped by user.')) 
+            self.stdout.write(self.style.WARNING('Worker stopped by user.'))

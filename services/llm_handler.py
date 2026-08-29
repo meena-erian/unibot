@@ -199,6 +199,8 @@ def run_llm_handler(
     request=None,
     openai_client: OpenAI = None,
     api_mode: str = "chat_completions",
+    stream: bool = False,
+    event_sink: Optional[Callable[[dict], object]] = None,
 ) -> None:
     """
     Modular LLM handler for bots supporting audio, text, images, and tool use.
@@ -250,11 +252,49 @@ def run_llm_handler(
                 "Responses API tool calls are not supported yet; use "
                 "api_mode='chat_completions' when tools are enabled"
             )
-        response = openai_client.responses.create(
-            model=model,
-            input=messages,
-        )
-        return message.reply_with({'type': 'text', 'text': response.output_text})
+        if not stream:
+            response = openai_client.responses.create(
+                model=model,
+                input=messages,
+            )
+            return message.reply_with({'type': 'text', 'text': response.output_text})
+
+        text_parts = []
+        response_id = None
+        streamed_reply = event_sink({"type": "started"}) if event_sink else None
+        try:
+            events = openai_client.responses.create(
+                model=model,
+                input=messages,
+                stream=True,
+            )
+            for event in events:
+                event_type = getattr(event, "type", None)
+                if event_type == "response.output_text.delta":
+                    delta = getattr(event, "delta", "") or ""
+                    text_parts.append(delta)
+                    if event_sink:
+                        event_sink({"type": "text.delta", "delta": delta})
+                elif event_type in ("response.created", "response.completed"):
+                    response = getattr(event, "response", None)
+                    response_id = getattr(response, "id", response_id)
+            final_text = "".join(text_parts)
+            if event_sink:
+                streamed_reply = event_sink({
+                    "type": "finished",
+                    "text": final_text,
+                    "response_id": response_id,
+                }) or streamed_reply
+                return streamed_reply
+            return message.reply_with({"type": "text", "text": final_text})
+        except Exception as exc:
+            if event_sink:
+                event_sink({
+                    "type": "failed",
+                    "error": str(exc),
+                    "response_id": response_id,
+                })
+            raise
 
     # Single LLM call instead of loop - unicom handles tool call coordination
     kwargs = {}
