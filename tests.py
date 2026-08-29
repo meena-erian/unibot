@@ -69,6 +69,7 @@ class BotResponsesApiTests(SimpleTestCase):
             bot=Mock(), message=self.message, tools_list=[],
             model_default="test-model", openai_client=self.client,
             api_mode="responses", stream=True, event_sink=sink,
+            responses_options={"reasoning": {"effort": "low"}},
         )
 
         self.assertIs(result, streamed_reply)
@@ -76,6 +77,7 @@ class BotResponsesApiTests(SimpleTestCase):
             model="test-model",
             input=[{"role": "user", "content": "Hello"}],
             stream=True,
+            reasoning={"effort": "low"},
         )
         self.assertEqual(sink.call_args_list[0].args[0], {"type": "started"})
         self.assertEqual(sink.call_args_list[1].args[0], {"type": "text.delta", "delta": "Hel"})

@@ -201,6 +201,7 @@ def run_llm_handler(
     api_mode: str = "chat_completions",
     stream: bool = False,
     event_sink: Optional[Callable[[dict], object]] = None,
+    responses_options: Optional[dict] = None,
 ) -> None:
     """
     Modular LLM handler for bots supporting audio, text, images, and tool use.
@@ -252,10 +253,12 @@ def run_llm_handler(
                 "Responses API tool calls are not supported yet; use "
                 "api_mode='chat_completions' when tools are enabled"
             )
+        responses_kwargs = dict(responses_options or {})
         if not stream:
             response = openai_client.responses.create(
                 model=model,
                 input=messages,
+                **responses_kwargs,
             )
             return message.reply_with({'type': 'text', 'text': response.output_text})
 
@@ -267,6 +270,7 @@ def run_llm_handler(
                 model=model,
                 input=messages,
                 stream=True,
+                **responses_kwargs,
             )
             for event in events:
                 event_type = getattr(event, "type", None)
