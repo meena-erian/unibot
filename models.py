@@ -1,7 +1,7 @@
 from django.db import models, transaction
 import os
 from django.conf import settings
-from unicom.models import RequestCategory, Message, Account
+from unicom.models import RequestCategory, Message, Account, Request
 from unibot.services.llm_handler import run_llm_handler
 from typing import Callable, Dict, List, Optional, Type
 import types
@@ -347,6 +347,34 @@ class Bot(models.Model):
     request_category = models.OneToOneField(RequestCategory, on_delete=models.CASCADE, null=True, blank=True)
     # New many-to-many relationship to attach tools
     tools = models.ManyToManyField(Tool, blank=True, related_name='bots')
+
+    def queue_message(self, message, *, display_text=None, metadata=None):
+        """Route a persisted incoming turn to this bot without invoking a provider.
+
+        This is a trusted server-side API. The caller must authorize the sender,
+        complete any media grouping and suppress automatic request creation
+        while persisting that group. Existing requests are never rerouted.
+        """
+        if message._state.adding or message.is_outgoing is not False:
+            raise ValueError("Queue a persisted incoming message")
+        if not self.request_category_id:
+            raise ValueError("The bot must have a request category")
+        if not (message.raw or {}).get("skip_request_creation"):
+            raise ValueError("Explicit queueing requires suppressed automatic request creation")
+        account = message.sender
+        member = account.member
+        with transaction.atomic():
+            Message.objects.select_for_update().get(pk=message.pk)
+            if Request.objects.filter(message=message).exists():
+                raise ValueError("The message already has a request")
+            return Request.objects.create(
+                message=message, account=account, channel=message.channel,
+                member=member, email=member.email or None if member else None,
+                phone=member.phone or None if member else None,
+                category=self.request_category, status="QUEUED",
+                display_text=message.text if display_text is None else display_text,
+                metadata=dict(metadata or {}),
+            )
 
     def __str__(self):
         return self.name
