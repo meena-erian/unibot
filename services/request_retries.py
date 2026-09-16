@@ -51,6 +51,11 @@ def classify_retryable_failure(exc) -> str:
             return "transport_error"
         if isinstance(current, openai.APIError):
             message = str(current).lower()
+            body = getattr(current, "body", None)
+            if isinstance(body, dict):
+                message = f"{message} {body}".lower()
+            if "server_error" in message or "service_unavailable" in message:
+                return "provider_server"
             if any(marker in message for marker in TRANSIENT_MESSAGE_MARKERS):
                 return "provider_overload"
     return ""
@@ -95,4 +100,3 @@ def schedule_retry(request, exc, *, now=None, jitter=None) -> bool:
     jitter_factor = jitter if jitter is not None else random.uniform(0.8, 1.2)
     request.next_retry_at = now + timedelta(seconds=delays[request.retry_count] * jitter_factor)
     return True
-

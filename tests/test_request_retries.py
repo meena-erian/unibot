@@ -27,6 +27,14 @@ class RequestRetryPolicyTests(SimpleTestCase):
         )
         self.assertEqual(classify_retryable_failure(error), "provider_overload")
 
+    def test_structured_provider_server_error_is_retryable(self):
+        error = openai.APIError(
+            "An error occurred while processing your request.",
+            httpx.Request("POST", "https://provider.invalid/v1/responses"),
+            body={"error": {"type": "server_error", "code": "server_error"}},
+        )
+        self.assertEqual(classify_retryable_failure(error), "provider_server")
+
     def test_provider_bad_request_is_not_retryable(self):
         response = httpx.Response(
             400,
