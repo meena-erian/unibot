@@ -357,12 +357,13 @@ def run_llm_handler(
         # Mark it as non-final so Dashboard completion notifications wait for
         # the eventual response after the tool continuation.
         preamble = process_llm_content(msg)
+        preamble_message = None
         if (
             preamble.get('type') == 'text'
             and str(preamble.get('text') or '').strip()
         ):
             preamble['_message_raw'] = {'assistant_phase': 'tool_preamble'}
-            message.reply_with(preamble)
+            preamble_message = message.reply_with(preamble)
 
         # Convert OpenAI tool calls to unicom format
         tool_call_data = []
@@ -377,10 +378,18 @@ def run_llm_handler(
             })
 
         # Submit all tool calls to unicom (atomic operation)
-        unicom_tool_calls = request.submit_tool_calls(tool_call_data)
-        if not unicom_tool_calls:
-            # A newer user turn won the request lock while this LLM call was in flight.
-            return
+        with transaction.atomic():
+            unicom_tool_calls = request.submit_tool_calls(tool_call_data)
+            if not unicom_tool_calls:
+                return
+            if preamble_message is not None:
+                for tool_call in unicom_tool_calls:
+                    tool_call_message = tool_call.tool_call_message
+                    tool_call_message.raw = dict(tool_call_message.raw or {})
+                    tool_call_message.raw['assistant_preamble_message_id'] = str(
+                        preamble_message.pk
+                    )
+                    tool_call_message.save(update_fields=['raw'])
 
         def execute_tool_calls():
             # Execute each tool and respond immediately unless the tool returns None (which means the tool handles its own response asynchronously)
