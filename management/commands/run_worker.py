@@ -29,8 +29,13 @@ class Command(BaseCommand):
         sleep_time = options.get('sleep', 2)
 
         self.stdout.write(self.style.SUCCESS('Starting worker. Press Ctrl+C to stop.'))
+        next_expiry_check = 0
         try:
             while True:
+                if time.monotonic() >= next_expiry_check:
+                    from unicom.services.interactions import expire_interactions
+                    expire_interactions()
+                    next_expiry_check = time.monotonic() + 30
                 if bot_id:
                     bots = Bot.objects.filter(id=bot_id)
                 else:

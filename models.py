@@ -312,7 +312,9 @@ class Tool(models.Model):
         module.__dict__["ToolHandlerError"] = ToolHandlerError
         module.__dict__["ToolHandlerWarning"] = ToolHandlerWarning
         exec(self.code, module.__dict__)
-        return getattr(module, 'tool_definition', None)
+        from unibot.interactions import bind_interactions
+        definition = getattr(module, 'tool_definition', None)
+        return bind_interactions(self.name, definition) if definition else None
 
     @staticmethod
     def get_default_code():

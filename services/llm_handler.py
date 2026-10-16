@@ -415,6 +415,10 @@ def run_llm_handler(
                     tool_call_instance.respond(payload, status="ERROR")
                     continue
 
+                from unibot.interactions import handle_interaction_result
+                if handle_interaction_result(result, tool_call_instance):
+                    continue
+
                 # If tool returns None, it handles its own response - mark as ACTIVE
                 if result is None:
                     tool_call_instance.mark_active()
