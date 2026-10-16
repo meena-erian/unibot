@@ -4,6 +4,8 @@ A powerful Django app for creating and managing AI-powered bots with tool integr
 
 ## Table of Contents
 
+- [Interactive tools and custom presentations](TOOL_INTERACTIONS.md)
+
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [Dependencies](#dependencies)
@@ -462,6 +464,11 @@ python manage.py run_worker
 ```
 
 ### Creating Tools
+
+For persisted user choices and custom web cards, use
+[`MessageWithButtons` and tool presentations](TOOL_INTERACTIONS.md). These share
+buttons with Telegram, keep tool responses pending until a choice, and update
+the web component with final presentation data.
 
 > 📖 **For detailed tool development guidance, see [`TOOL_TEMPLATES_README.md`](templates/unibot/TOOL_TEMPLATES_README.md)**
 

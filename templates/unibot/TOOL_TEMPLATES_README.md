@@ -51,6 +51,20 @@ tool_definition = {
 }
 ```
 
+## Interactive tool UI
+
+For confirmations, choices, and custom web cards, return a
+`unicom.interactions.MessageWithButtons` from your tool. Declare handler classes
+in `tool_definition['interactions']` and optionally place a
+`<tool_name>.presentation.js` beside the definition. See the
+[interactive tools guide](../../TOOL_INTERACTIONS.md) for a complete example,
+static finder configuration, callback lifecycle, and the Web Component contract.
+
+This path owns callback dispatch and completion; do not also call
+`tool_call.respond()` or attach a legacy signal handler for the same interaction.
+The following lower-level delayed-response pattern remains useful for external
+jobs and existing callback integrations.
+
 ## Delayed Tool Responses
 
 By default, tools are expected to return a result immediately, which the system automatically sends to the LLM. However, some tools need to defer their response (e.g., waiting for user confirmation, long-running processes, scheduled tasks).
